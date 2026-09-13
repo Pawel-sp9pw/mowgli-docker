@@ -13,20 +13,8 @@ COPY --from=source /src /app
 WORKDIR /app
 RUN CGO_ENABLED=0 go build -o openmower-gui
 
-FROM node:18 AS build-web
-COPY --from=source /src/web /web
-WORKDIR /web
-RUN yarn --frozen-lockfile && yarn build
-
-# Reuse the known-good legacy GUI runtime image instead of rebuilding OpenOCD,
-# PlatformIO and Python tooling for every architecture.  The compatibility
-# change only affects the GUI binary/web assets, so keep the proven runtime
-# and replace just those artifacts.
+# The compatibility fix is backend-only. Keep the frontend and runtime from
+# the known-good v2 image, avoiding an unnecessary ARM64 yarn install/build.
 FROM ghcr.io/cedbossneo/openmower-gui:v2
-COPY --from=source /src/setup /app/setup
-COPY --from=build-web /web/dist /app/web
 COPY --from=build-go /app/openmower-gui /app/openmower-gui
-ENV WEB_DIR=/app/web
-ENV DB_PATH=/app/db
 WORKDIR /app
-CMD ["/app/openmower-gui"]
