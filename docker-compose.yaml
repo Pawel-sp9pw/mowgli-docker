@@ -18,7 +18,10 @@ services:
       "com.centurylinklabs.watchtower.enable": true
       project: openmower
       app: gui
-    image: ghcr.io/cedbossneo/openmower-gui:v2
+    image: ghcr.io/pawel-sp9pw/openmower-gui:mowgli-map-editor-fix
+    build:
+      context: .
+      dockerfile: docker/openmower-gui/Dockerfile
     restart: unless-stopped
     network_mode: host
     privileged: true
