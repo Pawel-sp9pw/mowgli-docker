@@ -1,6 +1,7 @@
 FROM alpine/git:latest AS source
 ARG GUI_REPO=https://github.com/cedbossneo/openmower-gui.git
-ARG GUI_REF=2de67f9914b1fff38a75f495e47aed8c18917f70
+# Match the backend source to the ghcr.io/cedbossneo/openmower-gui:v2 runtime/frontend.
+ARG GUI_REF=41ec7b529fb55720006922aee35d4b54795052d9
 RUN apk add --no-cache python3
 RUN git clone "$GUI_REPO" /src \
     && cd /src \
@@ -13,8 +14,9 @@ COPY --from=source /src /app
 WORKDIR /app
 RUN CGO_ENABLED=0 go build -o openmower-gui
 
-# The compatibility fix is backend-only. Keep the frontend and runtime from
-# the known-good v2 image, avoiding an unnecessary ARM64 yarn install/build.
+# Keep the packaged v2 frontend/runtime and replace only the matching patched
+# v2 backend. This avoids ARM64 yarn/network failures and keeps API versions
+# aligned (power/emergency/dockingSensor/system info included).
 FROM ghcr.io/cedbossneo/openmower-gui:v2
 COPY --from=build-go /app/openmower-gui /app/openmower-gui
 WORKDIR /app
