@@ -1,15 +1,15 @@
 diff --git a/pkg/api/openmower.go b/pkg/api/openmower.go
-index f20d6e3..0000000 100644
 --- a/pkg/api/openmower.go
 +++ b/pkg/api/openmower.go
-@@ -5,6 +5,7 @@ import (
+@@ -5,6 +5,7 @@
  	"encoding/json"
  	"errors"
  	"log"
 +	"math"
  	"net/http"
  	"time"
-@@ -35,6 +36,16 @@ func OpenMowerRoutes(r *gin.RouterGroup, provider types.IRosProvider) {
+ 
+@@ -35,6 +36,17 @@
  	PublisherRoute(group, provider)
  }
  
@@ -27,7 +27,7 @@ index f20d6e3..0000000 100644
  // AddMapAreaRoute add a map area
  //
  // @Summary add a map area
-@@ -51,6 +62,7 @@ func AddMapAreaRoute(group *gin.RouterGroup, provider types.IRosProvider) {
+@@ -53,6 +65,7 @@
  		if err != nil {
  			return
  		}
@@ -35,7 +35,7 @@ index f20d6e3..0000000 100644
  		err = provider.CallService(c.Request.Context(), "/mower_map_service/add_mowing_area", &mower_map.AddMowingAreaSrv{}, &CallReq, &mower_map.AddMowingAreaSrvRes{})
  		if err != nil {
  			c.JSON(500, ErrorResponse{Error: err.Error()})
-@@ -91,27 +103,31 @@ func ClearMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
+@@ -95,26 +108,37 @@
  // @Router /openmower/map [put]
  func ReplaceMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
  	group.PUT("/map", func(c *gin.Context) {
@@ -45,13 +45,9 @@ index f20d6e3..0000000 100644
 +		// map.json empty and forced a manual restore.
 +		var CallReq mower_map.ReplaceMowingAreaSrvReq
 +		err := unmarshalROSMessage[*mower_map.ReplaceMowingAreaSrvReq](c.Request.Body, &CallReq)
- 		if err != nil {
--			c.JSON(500, ErrorResponse{Error: err.Error()})
++		if err != nil {
 +			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
- 			return
--		} else {
--			var CallReq mower_map.ReplaceMowingAreaSrvReq
--			err := unmarshalROSMessage[*mower_map.ReplaceMowingAreaSrvReq](c.Request.Body, &CallReq)
++			return
 +		}
 +		if len(CallReq.Areas) == 0 {
 +			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "refusing to replace map with an empty area list; use DELETE /openmower/map to clear intentionally"})
@@ -62,9 +58,12 @@ index f20d6e3..0000000 100644
 +		}
 +
 +		err = provider.CallService(c.Request.Context(), "/mower_map_service/clear_map", &mower_map.ClearMapSrv{}, &mower_map.ClearMapSrvReq{}, &mower_map.ClearMapSrvRes{})
-+		if err != nil {
-+			c.JSON(500, ErrorResponse{Error: err.Error()})
-+			return
+ 		if err != nil {
+ 			c.JSON(500, ErrorResponse{Error: err.Error()})
+ 			return
+-		} else {
+-			var CallReq mower_map.ReplaceMowingAreaSrvReq
+-			err := unmarshalROSMessage[*mower_map.ReplaceMowingAreaSrvReq](c.Request.Body, &CallReq)
 +		}
 +
 +		for _, element := range CallReq.Areas {
@@ -80,24 +79,29 @@ index f20d6e3..0000000 100644
 -					return
 -				}
 -			}
--
++		}
+ 
 -			c.JSON(200, OkResponse{})
- 		}
-+
+-		}
 +		c.JSON(200, OkResponse{})
  	})
  }
 diff --git a/pkg/msgs/mower_map/MapArea.go b/pkg/msgs/mower_map/MapArea.go
-index 638e723..0000000 100644
 --- a/pkg/msgs/mower_map/MapArea.go
 +++ b/pkg/msgs/mower_map/MapArea.go
-@@ -9,7 +9,12 @@ import (
+@@ -8,8 +8,13 @@
+ )
+ 
  type MapArea struct {
- 	msg.Package `ros:"mower_map"`
- 	Name        string
-+	Active      bool
- 	Area        geometry_msgs.Polygon
- 	Obstacles   []geometry_msgs.Polygon
+-	msg.Package `ros:"mower_map"`
+-	Name        string
+-	Area        geometry_msgs.Polygon
+-	Obstacles   []geometry_msgs.Polygon
++	msg.Package         `ros:"mower_map"`
++	Name                string
++	Active              bool
++	Area                geometry_msgs.Polygon
++	Obstacles           []geometry_msgs.Polygon
 +	Angle               float64
 +	OutlineCount        int32   `rosname:"outline_count"`
 +	OutlineOverlapCount int32   `rosname:"outline_overlap_count"`
