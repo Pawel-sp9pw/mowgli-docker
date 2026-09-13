@@ -41,7 +41,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/openmower-gui:mowgli-map-editor-fix
-            ghcr.io/${{ github.repository_owner }}/openmower-gui:latest
+            ghcr.io/pawel-sp9pw/openmower-gui:mowgli-map-editor-fix
+            ghcr.io/pawel-sp9pw/openmower-gui:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
