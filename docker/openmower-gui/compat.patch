@@ -1,0 +1,105 @@
+diff --git a/pkg/api/openmower.go b/pkg/api/openmower.go
+index f20d6e3..0000000 100644
+--- a/pkg/api/openmower.go
++++ b/pkg/api/openmower.go
+@@ -5,6 +5,7 @@ import (
+ 	"encoding/json"
+ 	"errors"
+ 	"log"
++	"math"
+ 	"net/http"
+ 	"time"
+@@ -35,6 +36,16 @@ func OpenMowerRoutes(r *gin.RouterGroup, provider types.IRosProvider) {
+ 	PublisherRoute(group, provider)
+ }
+ 
++// normalizeLegacyMapArea fills fields which were added to mower_map/MapArea
++// after this GUI was originally generated. The legacy editor does not expose
++// these settings, so preserve the current OpenMower defaults.
++func normalizeLegacyMapArea(area *mower_map.MapArea) {
++	area.Active = true
++	area.Angle = math.NaN()
++	area.OutlineCount = -1
++	area.OutlineOverlapCount = -1
++	area.OutlineOffset = math.NaN()
++}
++
+ // AddMapAreaRoute add a map area
+ //
+ // @Summary add a map area
+@@ -51,6 +62,7 @@ func AddMapAreaRoute(group *gin.RouterGroup, provider types.IRosProvider) {
+ 		if err != nil {
+ 			return
+ 		}
++		normalizeLegacyMapArea(&CallReq.Area)
+ 		err = provider.CallService(c.Request.Context(), "/mower_map_service/add_mowing_area", &mower_map.AddMowingAreaSrv{}, &CallReq, &mower_map.AddMowingAreaSrvRes{})
+ 		if err != nil {
+ 			c.JSON(500, ErrorResponse{Error: err.Error()})
+@@ -91,27 +103,31 @@ func ClearMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
+ // @Router /openmower/map [put]
+ func ReplaceMapRoute(group *gin.RouterGroup, provider types.IRosProvider) {
+ 	group.PUT("/map", func(c *gin.Context) {
+-		err := provider.CallService(c.Request.Context(), "/mower_map_service/clear_map", &mower_map.ClearMapSrv{}, &mower_map.ClearMapSrvReq{}, &mower_map.ClearMapSrvRes{})
++		// Parse and validate the complete request BEFORE touching the persisted map.
++		// Previously clear_map was called first, so any decode/service mismatch left
++		// map.json empty and forced a manual restore.
++		var CallReq mower_map.ReplaceMowingAreaSrvReq
++		err := unmarshalROSMessage[*mower_map.ReplaceMowingAreaSrvReq](c.Request.Body, &CallReq)
+ 		if err != nil {
+-			c.JSON(500, ErrorResponse{Error: err.Error()})
++			c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+ 			return
+-		} else {
+-			var CallReq mower_map.ReplaceMowingAreaSrvReq
+-			err := unmarshalROSMessage[*mower_map.ReplaceMowingAreaSrvReq](c.Request.Body, &CallReq)
++		}
++		if len(CallReq.Areas) == 0 {
++			c.JSON(http.StatusBadRequest, ErrorResponse{Error: "refusing to replace map with an empty area list; use DELETE /openmower/map to clear intentionally"})
++			return
++		}
++		for i := range CallReq.Areas {
++			normalizeLegacyMapArea(&CallReq.Areas[i].Area)
++		}
++
++		err = provider.CallService(c.Request.Context(), "/mower_map_service/clear_map", &mower_map.ClearMapSrv{}, &mower_map.ClearMapSrvReq{}, &mower_map.ClearMapSrvRes{})
++		if err != nil {
++			c.JSON(500, ErrorResponse{Error: err.Error()})
++			return
++		}
++
++		for _, element := range CallReq.Areas {
++			err = provider.CallService(c.Request.Context(), "/mower_map_service/add_mowing_area", &mower_map.AddMowingAreaSrv{}, &element, &mower_map.AddMowingAreaSrvRes{})
+ 			if err != nil {
+ 				c.JSON(500, ErrorResponse{Error: err.Error()})
+ 				return
+ 			}
+-			for _, element := range CallReq.Areas {
+-				err = provider.CallService(c.Request.Context(), "/mower_map_service/add_mowing_area", &mower_map.AddMowingAreaSrv{}, &element, &mower_map.AddMowingAreaSrvRes{})
+-				if err != nil {
+-					c.JSON(500, ErrorResponse{Error: err.Error()})
+-					return
+-				}
+-			}
+-
+-			c.JSON(200, OkResponse{})
+ 		}
++
++		c.JSON(200, OkResponse{})
+ 	})
+ }
+diff --git a/pkg/msgs/mower_map/MapArea.go b/pkg/msgs/mower_map/MapArea.go
+index 638e723..0000000 100644
+--- a/pkg/msgs/mower_map/MapArea.go
++++ b/pkg/msgs/mower_map/MapArea.go
+@@ -9,7 +9,12 @@ import (
+ type MapArea struct {
+ 	msg.Package `ros:"mower_map"`
+ 	Name        string
++	Active      bool
+ 	Area        geometry_msgs.Polygon
+ 	Obstacles   []geometry_msgs.Polygon
++	Angle               float64
++	OutlineCount        int32   `rosname:"outline_count"`
++	OutlineOverlapCount int32   `rosname:"outline_overlap_count"`
++	OutlineOffset       float64 `rosname:"outline_offset"`
+ }
