@@ -45,3 +45,5 @@ jobs:
             ghcr.io/pawel-sp9pw/openmower-gui:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+# Trigger build after enabling Actions.
