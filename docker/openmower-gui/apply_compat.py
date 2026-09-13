@@ -36,6 +36,17 @@ new_replace_route = '''func ReplaceMapRoute(group *gin.RouterGroup, provider typ
 
 replace_once(openmower, old_replace_route, new_replace_route)
 
+# Some revisions of the legacy frontend open websocket subscriptions that this
+# backend never mapped (for example emergency, dockingSensor and power). In
+# that case def remains nil and the original code executes `defer def()`,
+# causing a nil-function panic. Leave supported topics unchanged and close an
+# unsupported subscription cleanly instead.
+replace_once(
+    openmower,
+    '''\t\tif err != nil {\n\t\t\tlog.Println(err.Error())\n\t\t\treturn\n\t\t}\n\t\tdefer def()\n''',
+    '''\t\tif err != nil {\n\t\t\tlog.Println(err.Error())\n\t\t\treturn\n\t\t}\n\t\tif def == nil {\n\t\t\tlog.Printf("unsupported OpenMower subscription topic: %s", topic)\n\t\t\treturn\n\t\t}\n\t\tdefer def()\n''',
+)
+
 replace_once(
     map_area,
     '''type MapArea struct {\n\tmsg.Package `ros:"mower_map"`\n\tName        string\n\tArea        geometry_msgs.Polygon\n\tObstacles   []geometry_msgs.Polygon\n}\n''',
