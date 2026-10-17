@@ -8,6 +8,7 @@ on:
       - fix/docking-no-spin-v3
       - fix/docking-no-spin-v4
       - fix/docking-no-spin-v5
+      - fix/docking-no-spin-v6
       - mowgli-map-editor-fix
     paths:
       - 'docker/openmower-docking/**'
@@ -56,7 +57,7 @@ jobs:
             cat /tmp/link-check
             ! grep -E "not found|undefined symbol" /tmp/link-check
             strings /opt/open_mower_ros/devel/lib/mower_logic/mower_logic | grep DockingApproachFTCPlanner > /dev/null
-            strings /opt/open_mower_ros/devel/lib/xbot_positioning/xbot_positioning | grep 'Mowgli heading v5 restored' > /dev/null
+            strings /opt/open_mower_ros/devel/lib/xbot_positioning/xbot_positioning | grep 'Mowgli heading v6 restored' > /dev/null
           '
 
       - name: Publish image

@@ -5,7 +5,7 @@ Obraz bazowy przypięto do manifestu
 `sha256:8b3336582fa2351254632f3b904ba302f35eeca6ddd68c712e6d4d0605f5cd8e`.
 Jego wariant ARM64 ma identyfikator konfiguracji
 `sha256:46270817c3302d6d1e1d7786af247a5ca87141d0b853c30b1f9deecc315f2cfe`,
-zgodny z odczytem z kosiarki. Wersja v5 zastępuje bibliotekę FTC, program
+zgodny z odczytem z kosiarki. Wersja v6 zastępuje bibliotekę FTC, program
 `mower_logic` oraz `xbot_positioning`. Nie zmienia map ani parametrów sprzętu.
 
 ## Zachowanie
@@ -69,7 +69,7 @@ Trasa podejścia jest publikowana także pod dotychczasowym
 Oba sterowniki korzystają z tego samego zatrzaskiwanego wydawcy, aby po ponownym
 połączeniu podgląd nie wybierał pomiędzy dwiema nieaktualnymi kopiami trasy.
 Tematy `global_point` pozostają oddzielne i wskazują rzeczywiście aktywny sterownik.
-Komunikaty `Mowgli docking v5 limit` zawierają etap, błędy i obowiązujące limity.
+Komunikaty `Mowgli docking v6 limit` zawierają etap, błędy i obowiązujące limity.
 
 Nie zwiększaj `docking_distance`, tolerancji ani timeoutu w celu obejścia błędu.
 Jeśli zapisany kierunek lub koniec trasy nie odpowiada stacji, trzeba poprawić
@@ -104,7 +104,7 @@ docker inspect mowgli-openmower --format '{{.Config.Image}}'
 docker inspect mowgli-openmower --format '{{index .Config.Labels "io.mowgli.docking-fix"}}'
 ```
 
-Znacznik powinien mieć wartość `no-spin-v5`. Przy pierwszej próbie obserwuj
+Znacznik powinien mieć wartość `no-spin-v6`. Przy pierwszej próbie obserwuj
 dokowanie z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
 Sprawdź wjazd na styki, zatrzymanie po wykryciu ładowania oraz wyjazd tyłem.
 Przy błędnym ustawieniu oczekiwanym zachowaniem jest przerwanie próby,
@@ -119,8 +119,8 @@ docker exec mowgli-openmower bash -lc 'source /opt/ros/noetic/setup.bash; rospar
 Lista musi zawierać `DockingApproachFTCPlanner`. Podczas podejścia publikowany
 jest teraz `/move_base_flex/DockingApproachFTCPlanner/global_point`; podczas
 końcowego wjazdu `/move_base_flex/DockingFTCPlanner/global_point`.
-W logu pojawiają się komunikaty `Mowgli docking no-spin v5 initialized` oraz
-`Mowgli docking v5 plan`, wskazujące wybrany tryb.
+W logu pojawiają się komunikaty `Mowgli docking no-spin v6 initialized` oraz
+`Mowgli docking v6 plan`, wskazujące wybrany tryb.
 
 ## Korekta blokady kierunku w v5
 
@@ -164,6 +164,45 @@ prawidłowo w ładującej stacji. Oczekuj komunikatu
 Następnie sprawdź `orientation_valid` po nadejściu świeżych danych IMU.
 Ta aktualizacja nie naprawia błędów sieci i sum kontrolnych transmisji.
 
+## Zapis postoju niezależny od wyłączenia GPS w IDLE — v6
+
+Po restarcie użytkownik otrzymał `checkpoint=0`, `BRAK ZAPISU` i
+`orientation_valid=0`. Nie nastąpiło więc odtworzenie błędnego zapisanego kąta:
+brakowało danych do odtworzenia. Wcześniej zarejestrowano rzeczywistą
+nieciągłość czasu IMU `dt=4.24175`, po której kierunek został zainicjalizowany
+w stacji. V6 nie zwiększa limitu IMU, aby ukryć tę nieciągłość.
+
+W v5 zapis wymagał `has_gps` i aktualnego `last_gps_time` z filtra pozycji.
+Tymczasem IDLE celowo wyłącza aktualizacje GPS, a zatrzymanie/przerwanie
+oddokowania może nastąpić przed zakończeniem oczekiwania na GPS.
+W takim stanie sam postój nie wystarczał do utworzenia pliku.
+
+V6 obserwuje `/ll/position/gps` przed sprawdzeniem przełącznika filtra:
+
+- Do zapisu wymagane jest 10 kolejnych, różnych w czasie pomiarów RTK Fixed
+  spełniających istniejący limit dokładności. Niepoprawne lub nieaktualne dane
+  resetują walidację; duplikaty nie zwiększają licznika. Skok pozycji ponad
+  0,25 m lub przerwa pomiarów ponad 1 s rozpoczynają walidację od nowa.
+- Nadal wymagany jest wcześniej znany kierunek, co najmniej 2 s postoju,
+  świeże pomiary prędkości i IMU oraz skalibrowany żyroskop. Dobry RTK nie
+  dostarcza kierunku nieruchomego robota i nie zastępuje jego inicjalizacji.
+- Zapis zawiera aktualną zmierzoną pozycję anteny i znany kierunek filtra,
+  nie potencjalnie nieaktualną pozycję niekorygowanej odometrii.
+- Obserwacja nie włącza GPS w filtrze ani nie zmienia bieżącego stanu filtra.
+  Dotychczasowe zachowanie IDLE i oddokowania pozostaje zachowane.
+- Pierwszy udany zapis po zatrzymaniu jest komunikatem WARN z pełną ścieżką
+  pliku: `Mowgli heading v6: stationary heading checkpoint saved; file=...`.
+  Jeśli zabraknie świeżego RTK lub IMU, log `checkpoint not saved` podaje
+  licznik próbek i ich wiek. Nie restartuj przed potwierdzeniem udanego zapisu.
+
+Po aktualizacji rozpocznij od prawidłowo ustawionej, ładującej stacji:
+utraconego wcześniej zapisu nie można odtworzyć z samego obrazu mapy.
+Po oddokowaniu zatrzymaj robot i poczekaj na komunikat udanego zapisu.
+Następnie, bez przestawiania i obracania robota, sprawdź restart.
+Oczekiwane komunikaty to `checkpoint=1` i
+`Mowgli heading v6 restored after stationary GPS validation`.
+Potwierdź także `orientation_valid=1` oraz fizyczną zgodność kierunku.
+
 ## Kierunek po restarcie poza stacją
 
 Oryginalny filtr pozycji zaczyna od `(0, 0, 0)` i oznacza kierunek jako poprawny,
@@ -173,13 +212,13 @@ nie dodaje stałego obrotu o 180 stopni: taki obrót zepsułby poprawnie ustalon
 orientację w innych miejscach.
 
 Użytkownik potwierdził, że podczas wyłączenia robot nie jest przestawiany ani
-obracany. Przy tym założeniu v5 zachowuje znany kierunek podczas postoju:
+obracany. Przy tym założeniu v6 zachowuje znany kierunek podczas postoju:
 
 - Kierunek musi najpierw zostać zainicjalizowany z pozycji stacji lub przez
   istniejącą usługę ustawienia pozycji. Dowolne początkowe zero nie jest zapisywane
   jako kierunek wiarygodny. Przy wykryciu świeżego napięcia ładowania w stanie
   IDLE kierunek może być zainicjalizowany z zapisanego punktu stacji bez wyjazdu.
-- Po co najmniej 2 sekundach postoju, z niedawnym GPS i znanym kierunkiem,
+- Po co najmniej 2 sekundach postoju, ze świeżym surowym RTK i znanym kierunkiem,
   zapisywany jest plik `$ROS_HOME/mowgli-heading-v1.txt` albo
   `~/.ros/mowgli-heading-v1.txt`. Istniejący montowany katalog `./ros` zachowuje go
   po odtworzeniu kontenera. Zapis odbywa się przez plik tymczasowy i zmianę nazwy.
@@ -202,11 +241,11 @@ inicjalizowany przed prognozą filtra. Niepoprawne odstępy nie są całkowane;
 rozróżnienie duplikatów i rzeczywistej utraty danych opisano w sekcji v5.
 Nie wolno zapisywać ani przywracać kierunku po nieobserwowanym ruchu.
 
-Pierwsze uruchomienie v5 wykonaj w prawidłowo ustawionej stacji. Po normalnym
+Pierwsze uruchomienie v6 wykonaj w prawidłowo ustawionej stacji. Po normalnym
 wyjeździe i odzyskaniu RTK zatrzymaj zadanie, poczekaj kilka sekund i sprawdź
-komunikat `Mowgli heading v5: stationary heading checkpoint saved.`
+komunikat `Mowgli heading v6: stationary heading checkpoint saved; file=...`.
 Dopiero potem sprawdzaj restart poza stacją. Pomyślne przywrócenie potwierdza
-`Mowgli heading v5 restored after stationary GPS validation`.
+`Mowgli heading v6 restored after stationary GPS validation`.
 Próby wykonuj z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
 
 GPS nie wykryje ręcznego obrócenia robota w tym samym miejscu podczas wyłączenia.
@@ -227,6 +266,9 @@ Dla v5 lokalne testy C++ wykonują także fragment obsługi IMU i pełny callbac
 enkoderów wygenerowane przez ten sam skrypt, który modyfikuje obraz bazowy.
 Sprawdzane są duplikaty, opóźnione próbki, powtarzające się błędy czasu, realne
 przerwy, niepoprawny przelicznik, maska kół oraz dane postoju z urządzenia.
+Dla v6 dodano scenariusz wyłączonego filtra GPS po oddokowaniu: zapis, odczyt
+i przywrócenie tego samego kierunku po symulowanym restarcie. Testy sprawdzają
+także odrzucanie nieznanego kierunku, nieaktualnych danych, duplikatów i utraty RTK.
 Nie zastępuje to weryfikacji fizycznego robota, przyczepności ani jakości GPS.
 
 Błędy `Network is unreachable` i niezgodne sumy kontrolne są osobnymi problemami

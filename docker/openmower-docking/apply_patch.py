@@ -45,7 +45,7 @@ def patch(workspace):
         mowgli_docking_enabled = mowgli_docking_enabled &&
             (name == "DockingFTCPlanner" || mowgli_approach_controller);
         if (mowgli_docking_enabled)
-            ROS_WARN_STREAM("Mowgli docking no-spin v5 initialized: " << name);""")
+            ROS_WARN_STREAM("Mowgli docking no-spin v6 initialized: " << name);""")
     source = replace_once(source,
         '        global_plan_pub = private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);',
         """        global_plan_pub = name == "FTCPlanner" ? mowgli_compatible_plan_publisher() :
@@ -82,7 +82,7 @@ def patch(workspace):
             mowgli_docking_active = straight_forward && previous_forward > 0.0;
         }
         if (mowgli_docking_active || mowgli_approach_controller)
-            ROS_WARN_STREAM("Mowgli docking v5 plan: approach=" << mowgli_approach_controller
+            ROS_WARN_STREAM("Mowgli docking v6 plan: approach=" << mowgli_approach_controller
                 << ", straight_no_spin=" << mowgli_docking_active);
         global_plan = plan;""")
     source = replace_once(source, "        update_control_point(dt);", """        if ((mowgli_docking_active || mowgli_approach_controller) &&
@@ -106,7 +106,7 @@ def patch(workspace):
             mowgli_docking::valid_pose(lon_error, lat_error, angle_error, config.max_follow_distance);
         if (mowgli_docking_active && !valid_docking_pose)
         {
-            ROS_ERROR_STREAM("Mowgli docking v5 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
+            ROS_ERROR_STREAM("Mowgli docking v6 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
                 << ", lon=" << lon_error << ", lat=" << lat_error
                 << ", angle_deg=" << angle_error * (180.0 / M_PI)
                 << ", follow_limit=" << config.max_follow_distance
@@ -152,7 +152,7 @@ def patch(workspace):
                     return FINISHED;
                 if (time_in_current_state() > config.goal_timeout || lon_error <= 0.0)
                 {
-                    ROS_ERROR_STREAM("Mowgli docking v5 final pose not reached: approach=" << mowgli_approach_controller
+                    ROS_ERROR_STREAM("Mowgli docking v6 final pose not reached: approach=" << mowgli_approach_controller
                         << ", distance=" << distance << ", lon=" << lon_error << ", lat=" << lat_error
                         << ", angle_deg=" << angle_error * (180.0 / M_PI));
                     is_crashed = true;
@@ -239,7 +239,7 @@ def patch(workspace):
     const auto mowgli_imu_action = mowgli_heading::classify_interval(mowgli_imu_dt);
     if (mowgli_imu_action == mowgli_heading::IntervalAction::Discard && ++mowgli_imu_discard_count <= 2)
     {
-        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v5: dropped IMU sample; dt=" << mowgli_imu_dt
+        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v6: dropped IMU sample; dt=" << mowgli_imu_dt
             << ", stamp=" << msg->header.stamp.toSec()
             << ", last=" << last_imu.header.stamp.toSec());
         return;
@@ -254,7 +254,7 @@ def patch(workspace):
             mowgli_invalidate_heading_checkpoint();
             mowgli_heading_known = false;
         }
-        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v5: IMU discontinuity; dt=" << mowgli_imu_dt
+        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v6: IMU discontinuity; dt=" << mowgli_imu_dt
             << ", stamp=" << msg->header.stamp.toSec()
             << "; heading invalid, initialize at dock.");
         return;
@@ -279,7 +279,7 @@ def patch(workspace):
             mowgli_invalidate_heading_checkpoint();
             mowgli_heading_known = false;
         }
-        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v5: invalid wheel data; factor=" << msg->wheel_tick_factor
+        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v6: invalid wheel data; factor=" << msg->wheel_tick_factor
             << ", valid_wheels=" << int(msg->valid_wheels));
         return;
     }""")
@@ -287,7 +287,7 @@ def patch(workspace):
     const auto mowgli_tick_action = mowgli_heading::classify_interval(dt);
     if (mowgli_tick_action == mowgli_heading::IntervalAction::Discard && ++mowgli_tick_discard_count <= 2)
     {
-        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v5: dropped wheel sample; dt=" << dt);
+        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v6: dropped wheel sample; dt=" << dt);
         return;
     }
     if (mowgli_tick_action != mowgli_heading::IntervalAction::Integrate)
@@ -301,7 +301,7 @@ def patch(workspace):
             mowgli_invalidate_heading_checkpoint();
             mowgli_heading_known = false;
         }
-        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v5: invalid wheel sample; dt=" << dt
+        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v6: invalid wheel sample; dt=" << dt
             << ", factor=" << msg->wheel_tick_factor << ", valid_wheels=" << int(msg->valid_wheels));
         return;
     }""")
@@ -330,7 +330,8 @@ def patch(workspace):
     mowgli_heading_known = true;
     mowgli_heading_pending = false;""")
     positioning = replace_once(positioning, "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {",
-        "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {\n    mowgli_try_restore_heading(*msg);")
+        "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {\n"
+        "    if (mowgli_observe_raw_gps(*msg))\n        mowgli_try_restore_heading(*msg);")
     positioning = replace_once(positioning, "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);",
         "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);\n    mowgli_initialize_heading(paramNh);")
 
@@ -348,7 +349,7 @@ def patch(workspace):
     {
       setRobotPose(docking_pose_stamped.pose);
       mowgli_last_dock_init = ros::WallTime::now();
-      ROS_WARN("Mowgli heading v5: initialized heading from the charging dock.");
+      ROS_WARN("Mowgli heading v6: initialized heading from the charging dock.");
     }""")
 
     header_path.write_text(header)
