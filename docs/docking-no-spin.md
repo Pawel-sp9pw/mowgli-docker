@@ -23,17 +23,25 @@ dotychczasowe działanie. Tryb jest wybierany ponownie dla każdego planu.
 Wersja v1 nie obejmowała podejścia: obserwacja aktywnego
 `/move_base_flex/FTCPlanner/global_point` przy około 20 Hz podczas postoju
 potwierdziła, że w tamtej chwili pracował jeszcze poprzedni sterownik.
+Wersja v3 poprawia przekazanie pozycji pomiędzy etapami: v2 stosowała zbyt wcześnie
+sztywne limity końcowego wjazdu (0,1 m i 10 stopni), mimo że wcześniejszy dojazd
+mógł poprawnie zakończyć się z tolerancją 0,2 m i 20 stopni. Teraz początek prostego
+podejścia respektuje skonfigurowane tolerancje podejścia i `max_follow_distance`.
 
 - W `WAITING_FOR_GOAL_APPROACH` robot może powoli nadrobić brakującą pozycję.
 - Prędkość jest ograniczona do 0,1 m/s i istniejącego limitu sterownika.
 - Prędkość obrotu nie przekracza `2 * prędkość liniowa`; przy zerowej jeździe
   obrót również wynosi zero. Robot nie wykonuje końcowego obrotu w miejscu.
-- Błąd boczny ponad 0,1 m, błąd kierunku ponad 10 stopni, przekroczenie
-  `max_follow_distance`, niepoprawne pomiary lub cofnięcie zegara przerywają próbę.
+- Podczas końcowego wjazdu błąd boczny ponad 0,1 m lub błąd kierunku ponad
+  10 stopni przerywa próbę. Początek prostego podejścia używa jego skonfigurowanych
+  tolerancji pozycji i kierunku. W obu etapach przekroczenie `max_follow_distance`,
+  niepoprawne pomiary lub cofnięcie zegara przerywają próbę.
 - Koniec końcowego wjazdu wymaga błędu pozycji poniżej 0,02 m albo mniejszej
-  istniejącej tolerancji. Podejście zachowuje własną tolerancję pozycji, ponieważ
-  nadal używa GPS. Po przekroczeniu `goal_timeout` w oczekiwaniu na pozycję
-  sterownik zgłasza błąd zamiast sukcesu.
+  istniejącej tolerancji. Proste podejście przed przekazaniem do końcowego wjazdu
+  wymaga błędu pozycji poniżej 0,1 m i kierunku poniżej 10 stopni, albo mniejszych
+  skonfigurowanych tolerancji. Błąd mieszczący się w szerszej tolerancji dojazdu
+  jest korygowany podczas ruchu zamiast natychmiast przerywać próbę.
+  Po przekroczeniu `goal_timeout` w oczekiwaniu na pozycję sterownik zgłasza błąd.
 - Robot nie cofa podczas wjazdu i nie jedzie poza koniec zadanej trasy.
 - Rozpoznawanie napięcia ładowania, anulowanie, GPS i zabezpieczenia odometrii
   pozostają obsługiwane przez dotychczasową logikę OpenMower.
@@ -44,6 +52,13 @@ W oczekiwaniu na pozycję także ten etap może nadrobić dystans i ma ogranicze
 obrotu zależne od jazdy. Przy przejściu do końcowego ustawienia kierunku wysyłane
 jest zero, a kolejny cykl ocenia aktualny kąt celu przed wydaniem polecenia obrotu.
 Jeżeli robot jest już ustawiony w wymaganej tolerancji, nie wykonuje korekty.
+
+Trasa podejścia jest publikowana także pod dotychczasowym
+`/move_base_flex/FTCPlanner/global_plan`, używanym przez starszy podgląd trasy.
+Oba sterowniki korzystają z tego samego zatrzaskiwanego wydawcy, aby po ponownym
+połączeniu podgląd nie wybierał pomiędzy dwiema nieaktualnymi kopiami trasy.
+Tematy `global_point` pozostają oddzielne i wskazują rzeczywiście aktywny sterownik.
+Komunikaty `Mowgli docking v3 limit` zawierają etap, błędy i obowiązujące limity.
 
 Nie zwiększaj `docking_distance`, tolerancji ani timeoutu w celu obejścia błędu.
 Jeśli zapisany kierunek lub koniec trasy nie odpowiada stacji, trzeba poprawić
@@ -78,7 +93,7 @@ docker inspect mowgli-openmower --format '{{.Config.Image}}'
 docker inspect mowgli-openmower --format '{{index .Config.Labels "io.mowgli.docking-fix"}}'
 ```
 
-Znacznik powinien mieć wartość `no-spin-v2`. Przy pierwszej próbie obserwuj
+Znacznik powinien mieć wartość `no-spin-v3`. Przy pierwszej próbie obserwuj
 dokowanie z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
 Sprawdź wjazd na styki, zatrzymanie po wykryciu ładowania oraz wyjazd tyłem.
 Przy błędnym ustawieniu oczekiwanym zachowaniem jest przerwanie próby,
@@ -93,8 +108,8 @@ docker exec mowgli-openmower bash -lc 'source /opt/ros/noetic/setup.bash; rospar
 Lista musi zawierać `DockingApproachFTCPlanner`. Podczas podejścia publikowany
 jest teraz `/move_base_flex/DockingApproachFTCPlanner/global_point`; podczas
 końcowego wjazdu `/move_base_flex/DockingFTCPlanner/global_point`.
-W logu pojawiają się komunikaty `Mowgli docking no-spin v2 initialized` oraz
-`Mowgli docking v2 plan`, wskazujące wybrany tryb.
+W logu pojawiają się komunikaty `Mowgli docking no-spin v3 initialized` oraz
+`Mowgli docking v3 plan`, wskazujące wybrany tryb.
 
 ## Powrót do poprzedniego obrazu
 

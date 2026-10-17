@@ -17,11 +17,20 @@ def patch(workspace):
 
     header = replace_once(header, "        FTCPlannerConfig config;", """        FTCPlannerConfig config;
         bool mowgli_approach_controller = false;
+        ros::Publisher mowgli_approach_plan_pub;
         bool mowgli_docking_enabled = false;
         bool mowgli_docking_active = false;""")
     source = replace_once(source, "#include <ftc_local_planner/ftc_planner.h>", """#include <ftc_local_planner/ftc_planner.h>
 #include \"ftc_local_planner/docking_control.h\"
 #include <stdexcept>""")
+    source = replace_once(source, "    FTCPlanner::FTCPlanner()", """    ros::Publisher mowgli_compatible_plan_publisher()
+    {
+        static ros::NodeHandle legacy_nh("~/FTCPlanner");
+        static ros::Publisher publisher = legacy_nh.advertise<nav_msgs::Path>("global_plan", 1, true);
+        return publisher;
+    }
+
+    FTCPlanner::FTCPlanner()""")
     source = replace_once(source, '        ros::NodeHandle private_nh("~/" + name);', """        ros::NodeHandle private_nh("~/" + name);
         mowgli_approach_controller = name == "DockingApproachFTCPlanner";
         if (mowgli_approach_controller)
@@ -36,7 +45,16 @@ def patch(workspace):
         mowgli_docking_enabled = mowgli_docking_enabled &&
             (name == "DockingFTCPlanner" || mowgli_approach_controller);
         if (mowgli_docking_enabled)
-            ROS_WARN_STREAM("Mowgli docking no-spin v2 initialized: " << name);""")
+            ROS_WARN_STREAM("Mowgli docking no-spin v3 initialized: " << name);""")
+    source = replace_once(source,
+        '        global_plan_pub = private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);',
+        """        global_plan_pub = name == "FTCPlanner" ? mowgli_compatible_plan_publisher() :
+            private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);
+        if (mowgli_approach_controller)
+            mowgli_approach_plan_pub = mowgli_compatible_plan_publisher();""")
+    source = replace_once(source, "        global_plan_pub.publish(path);", """        global_plan_pub.publish(path);
+        if (mowgli_approach_controller)
+            mowgli_approach_plan_pub.publish(path);""")
     source = replace_once(source, "        global_plan = plan;", """        mowgli_docking_active = false;
         if (mowgli_docking_enabled && plan.size() > 2)
         {
@@ -64,7 +82,7 @@ def patch(workspace):
             mowgli_docking_active = straight_forward && previous_forward > 0.0;
         }
         if (mowgli_docking_active || mowgli_approach_controller)
-            ROS_WARN_STREAM("Mowgli docking v2 plan: approach=" << mowgli_approach_controller
+            ROS_WARN_STREAM("Mowgli docking v3 plan: approach=" << mowgli_approach_controller
                 << ", straight_no_spin=" << mowgli_docking_active);
         global_plan = plan;""")
     source = replace_once(source, "        update_control_point(dt);", """        if ((mowgli_docking_active || mowgli_approach_controller) &&
@@ -76,10 +94,19 @@ def patch(workspace):
             return RET_COLLISION;
         }
         update_control_point(dt);
-        if (mowgli_docking_active &&
-            !mowgli_docking::valid_pose(lon_error, lat_error, angle_error, config.max_follow_distance))
+        const bool valid_docking_pose = mowgli_approach_controller ?
+            mowgli_docking::valid_approach_pose(lon_error, lat_error, angle_error,
+                config.max_follow_distance, config.max_goal_distance_error,
+                config.max_goal_angle_error * (M_PI / 180.0)) :
+            mowgli_docking::valid_pose(lon_error, lat_error, angle_error, config.max_follow_distance);
+        if (mowgli_docking_active && !valid_docking_pose)
         {
-            ROS_ERROR("Mowgli docking: alignment or position limit exceeded; stopping without rotation.");
+            ROS_ERROR_STREAM("Mowgli docking v3 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
+                << ", lon=" << lon_error << ", lat=" << lat_error
+                << ", angle_deg=" << angle_error * (180.0 / M_PI)
+                << ", follow_limit=" << config.max_follow_distance
+                << ", lateral_limit=" << (mowgli_approach_controller ? config.max_goal_distance_error : mowgli_docking::max_lateral_error)
+                << ", angle_limit_deg=" << (mowgli_approach_controller ? config.max_goal_angle_error : 10.0));
             is_crashed = true;
             cmd_vel.twist.linear.x = 0.0;
             cmd_vel.twist.angular.z = 0.0;
@@ -112,13 +139,17 @@ def patch(workspace):
             double distance = local_control_point.translation().norm();
             if (mowgli_docking_active)
             {
-                const double tolerance = mowgli_approach_controller ? config.max_goal_distance_error :
-                    std::min(config.max_goal_distance_error, mowgli_docking::goal_distance);
-                if (distance < tolerance)
+                const bool reached = mowgli_approach_controller ?
+                    mowgli_docking::approach_goal_reached(distance, angle_error,
+                        config.max_goal_distance_error, config.max_goal_angle_error * (M_PI / 180.0)) :
+                    distance < std::min(config.max_goal_distance_error, mowgli_docking::goal_distance);
+                if (reached)
                     return FINISHED;
                 if (time_in_current_state() > config.goal_timeout || lon_error <= 0.0)
                 {
-                    ROS_ERROR("Mowgli docking: final position not reached; stopping without rotation.");
+                    ROS_ERROR_STREAM("Mowgli docking v3 final pose not reached: approach=" << mowgli_approach_controller
+                        << ", distance=" << distance << ", lon=" << lon_error << ", lat=" << lat_error
+                        << ", angle_deg=" << angle_error * (180.0 / M_PI));
                     is_crashed = true;
                     return FINISHED;
                 }
