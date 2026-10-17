@@ -45,7 +45,7 @@ def patch(workspace):
         mowgli_docking_enabled = mowgli_docking_enabled &&
             (name == "DockingFTCPlanner" || mowgli_approach_controller);
         if (mowgli_docking_enabled)
-            ROS_WARN_STREAM("Mowgli docking no-spin v3 initialized: " << name);""")
+            ROS_WARN_STREAM("Mowgli docking no-spin v4 initialized: " << name);""")
     source = replace_once(source,
         '        global_plan_pub = private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);',
         """        global_plan_pub = name == "FTCPlanner" ? mowgli_compatible_plan_publisher() :
@@ -82,11 +82,16 @@ def patch(workspace):
             mowgli_docking_active = straight_forward && previous_forward > 0.0;
         }
         if (mowgli_docking_active || mowgli_approach_controller)
-            ROS_WARN_STREAM("Mowgli docking v3 plan: approach=" << mowgli_approach_controller
+            ROS_WARN_STREAM("Mowgli docking v4 plan: approach=" << mowgli_approach_controller
                 << ", straight_no_spin=" << mowgli_docking_active);
         global_plan = plan;""")
     source = replace_once(source, "        update_control_point(dt);", """        if ((mowgli_docking_active || mowgli_approach_controller) &&
-            (!std::isfinite(dt) || dt <= 0.0))
+            (!std::isfinite(dt) || dt <= 0.0 ||
+             !std::isfinite(config.max_follow_distance) || config.max_follow_distance <= 0.0 ||
+             !std::isfinite(config.max_cmd_vel_speed) || config.max_cmd_vel_speed <= 0.0 ||
+             !std::isfinite(config.speed_fast) || config.speed_fast < 0.0 ||
+             !std::isfinite(config.speed_slow) || config.speed_slow < 0.0 ||
+             !std::isfinite(config.acceleration) || config.acceleration < 0.0))
         {
             is_crashed = true;
             cmd_vel.twist.linear.x = 0.0;
@@ -101,12 +106,12 @@ def patch(workspace):
             mowgli_docking::valid_pose(lon_error, lat_error, angle_error, config.max_follow_distance);
         if (mowgli_docking_active && !valid_docking_pose)
         {
-            ROS_ERROR_STREAM("Mowgli docking v3 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
+            ROS_ERROR_STREAM("Mowgli docking v4 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
                 << ", lon=" << lon_error << ", lat=" << lat_error
                 << ", angle_deg=" << angle_error * (180.0 / M_PI)
                 << ", follow_limit=" << config.max_follow_distance
-                << ", lateral_limit=" << (mowgli_approach_controller ? config.max_goal_distance_error : mowgli_docking::max_lateral_error)
-                << ", angle_limit_deg=" << (mowgli_approach_controller ? config.max_goal_angle_error : 10.0));
+                << ", lateral_limit=" << (mowgli_approach_controller ? config.max_follow_distance : mowgli_docking::max_lateral_error)
+                << ", angle_limit_deg=" << (mowgli_approach_controller ? 45.0 : 10.0));
             is_crashed = true;
             cmd_vel.twist.linear.x = 0.0;
             cmd_vel.twist.angular.z = 0.0;
@@ -147,7 +152,7 @@ def patch(workspace):
                     return FINISHED;
                 if (time_in_current_state() > config.goal_timeout || lon_error <= 0.0)
                 {
-                    ROS_ERROR_STREAM("Mowgli docking v3 final pose not reached: approach=" << mowgli_approach_controller
+                    ROS_ERROR_STREAM("Mowgli docking v4 final pose not reached: approach=" << mowgli_approach_controller
                         << ", distance=" << distance << ", lon=" << lon_error << ", lat=" << lat_error
                         << ", angle_deg=" << angle_error * (180.0 / M_PI));
                     is_crashed = true;
@@ -174,6 +179,13 @@ def patch(workspace):
                 is_crashed = true;
                 return FINISHED;
             }""")
+    source = replace_once(source, "            speed = speed * velocity_limit;", """            if (mowgli_docking_active)
+            {
+                speed = mowgli_docking::reference_speed(speed, config.max_cmd_vel_speed);
+                current_movement_speed = mowgli_docking::reference_speed(
+                    current_movement_speed, config.max_cmd_vel_speed);
+            }
+            speed = speed * velocity_limit;""")
     anchor = "    void FTCPlanner::calculate_velocity_commands("
     prefix, separator, commands = source.partition(anchor)
     if not separator or commands.count("        if (current_state == FOLLOWING)\n") != 2:
@@ -217,11 +229,60 @@ def patch(workspace):
         '<node launch-prefix="/usr/bin/python3 /opt/mowgli-docking/register_controller.py" '
         'name="move_base_flex" pkg="mbf_costmap_nav"')
 
+    positioning_path = workspace / "src/lib/xbot_positioning/src/xbot_positioning.cpp"
+    positioning = positioning_path.read_text()
+    positioning = replace_once(positioning, "void onImu(const sensor_msgs::Imu::ConstPtr &msg) {",
+        '#include "heading_ros.h"\n\nvoid onImu(const sensor_msgs::Imu::ConstPtr &msg) {')
+    positioning = replace_once(positioning,
+        "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());",
+        "    mowgli_track_stationary(msg->angular_velocity.z - gyro_offset);\n"
+        "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());")
+    positioning = replace_once(positioning, "    xb_absolute_pose_msg.orientation_valid = true;",
+        "    xb_absolute_pose_msg.orientation_valid = !mowgli_restore_heading || mowgli_heading_known;")
+    positioning = replace_once(positioning, "    vx = d_ticks / dt;",
+        "    vx = d_ticks / dt;\n    mowgli_last_speed = ros::WallTime::now();")
+    positioning = replace_once(positioning, "    vx = msg->twist.linear.x;",
+        "    vx = msg->twist.linear.x;\n    mowgli_last_speed = ros::WallTime::now();")
+    positioning = replace_once(positioning, "    tf2::Matrix3x3 m(q);",
+        "    if (!std::isfinite(q.length2()) || std::abs(q.length2() - 1.0) > 0.001)\n"
+        "        return false;\n    tf2::Matrix3x3 m(q);")
+    positioning = replace_once(positioning, "    core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);",
+        """    if (!std::isfinite(req.robot_pose.position.x) || !std::isfinite(req.robot_pose.position.y) ||
+        !std::isfinite(yaw))
+        return false;
+    core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);
+    mowgli_heading_known = true;
+    mowgli_heading_pending = false;""")
+    positioning = replace_once(positioning, "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {",
+        "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {\n    mowgli_try_restore_heading(*msg);")
+    positioning = replace_once(positioning, "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);",
+        "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);\n    mowgli_initialize_heading(paramNh);")
+
+    idle_path = workspace / "src/mower_logic/src/mower_logic/behaviors/IdleBehavior.cpp"
+    idle = replace_once(idle_path.read_text(), "extern mower_msgs::Power getPower();",
+        "extern mower_msgs::Power getPower();\nextern xbot_msgs::AbsolutePose getPose();")
+    idle = replace_once(idle, "  ros::Rate r(25);", "  bool mowgli_dock_pose_initialized = false;\n  ros::Rate r(25);")
+    idle = replace_once(idle,
+        "    const float last_charge_v = utils::GetFirstValid({last_power.charge_voltage_adc, last_power.charge_voltage});",
+        """    const float last_charge_v = utils::GetFirstValid({last_power.charge_voltage_adc, last_power.charge_voltage});
+    const double mowgli_power_age = (ros::Time::now() - last_power.stamp).toSec();
+    if (!mowgli_dock_pose_initialized && !getPose().orientation_valid &&
+        last_charge_v > 5.0 && mowgli_power_age >= 0.0 && mowgli_power_age < 1.0)
+    {
+      setRobotPose(docking_pose_stamped.pose);
+      mowgli_dock_pose_initialized = true;
+      ROS_WARN("Mowgli heading v4: initialized heading from the charging dock.");
+    }""")
+
     header_path.write_text(header)
     source_path.write_text(source)
     behavior_path.write_text(behavior)
     params_path.write_text(params)
     launch_path.write_text(launch)
+    positioning_path.write_text(positioning)
+    idle_path.write_text(idle)
+    for helper_name in ("heading_checkpoint.h", "heading_ros.h"):
+        (positioning_path.parent / helper_name).write_text(Path(__file__).with_name(helper_name).read_text())
     helper = Path(__file__).with_name("docking_control.h").read_text()
     (header_path.parent / "docking_control.h").write_text(helper)
 

@@ -5,8 +5,8 @@ Obraz bazowy przypięto do manifestu
 `sha256:8b3336582fa2351254632f3b904ba302f35eeca6ddd68c712e6d4d0605f5cd8e`.
 Jego wariant ARM64 ma identyfikator konfiguracji
 `sha256:46270817c3302d6d1e1d7786af247a5ca87141d0b853c30b1f9deecc315f2cfe`,
-zgodny z odczytem z kosiarki. Wersja v2 zastępuje bibliotekę FTC i program
-`mower_logic`, aby przełączyć oba etapy podejścia na osobny sterownik.
+zgodny z odczytem z kosiarki. Wersja v4 zastępuje bibliotekę FTC, program
+`mower_logic` oraz `xbot_positioning`. Nie zmienia map ani parametrów sprzętu.
 
 ## Zachowanie
 
@@ -25,16 +25,27 @@ Wersja v1 nie obejmowała podejścia: obserwacja aktywnego
 potwierdziła, że w tamtej chwili pracował jeszcze poprzedni sterownik.
 Wersja v3 poprawia przekazanie pozycji pomiędzy etapami: v2 stosowała zbyt wcześnie
 sztywne limity końcowego wjazdu (0,1 m i 10 stopni), mimo że wcześniejszy dojazd
-mógł poprawnie zakończyć się z tolerancją 0,2 m i 20 stopni. Teraz początek prostego
-podejścia respektuje skonfigurowane tolerancje podejścia i `max_follow_distance`.
+mógł poprawnie zakończyć się z tolerancją 0,2 m i 20 stopni.
+
+Wersja v4 usuwa dwie przyczyny kolejnych przerwań widocznych w logach v3:
+punkt prowadzący poruszał się z prędkością 0,3/0,15 m/s, mimo ograniczenia robota
+do 0,1 m/s, więc wyprzedzał go o ponad `max_follow_distance=0.55`.
+Ponadto tolerancje pozycji i kierunku celu były błędnie użyte jako granice
+śledzenia całego podejścia. Błąd boczny 0,206758 m przerywał próbę przy tolerancji
+celu 0,2 m, mimo że mieścił się w promieniu śledzenia 0,55 m.
 
 - W `WAITING_FOR_GOAL_APPROACH` robot może powoli nadrobić brakującą pozycję.
 - Prędkość jest ograniczona do 0,1 m/s i istniejącego limitu sterownika.
+- Na prostych odcinkach taki sam limit obowiązuje punkt prowadzący oraz jego
+  prędkość początkową, przed uwzględnieniem mnożnika ograniczenia prędkości.
+  Nie zwiększamy `max_follow_distance` w celu zamaskowania opóźnienia robota.
 - Prędkość obrotu nie przekracza `2 * prędkość liniowa`; przy zerowej jeździe
   obrót również wynosi zero. Robot nie wykonuje końcowego obrotu w miejscu.
 - Podczas końcowego wjazdu błąd boczny ponad 0,1 m lub błąd kierunku ponad
-  10 stopni przerywa próbę. Początek prostego podejścia używa jego skonfigurowanych
-  tolerancji pozycji i kierunku. W obu etapach przekroczenie `max_follow_distance`,
+  10 stopni przerywa próbę. Podczas prostego podejścia obowiązują promień
+  `max_follow_distance` oraz osobny limit kierunku 45 stopni, umożliwiający
+  korektę boczną podczas jazdy. Tolerancje celu dotyczą zakończenia podejścia,
+  nie każdego punktu prowadzącego. W obu etapach przekroczenie `max_follow_distance`,
   niepoprawne pomiary lub cofnięcie zegara przerywają próbę.
 - Koniec końcowego wjazdu wymaga błędu pozycji poniżej 0,02 m albo mniejszej
   istniejącej tolerancji. Proste podejście przed przekazaniem do końcowego wjazdu
@@ -58,7 +69,7 @@ Trasa podejścia jest publikowana także pod dotychczasowym
 Oba sterowniki korzystają z tego samego zatrzaskiwanego wydawcy, aby po ponownym
 połączeniu podgląd nie wybierał pomiędzy dwiema nieaktualnymi kopiami trasy.
 Tematy `global_point` pozostają oddzielne i wskazują rzeczywiście aktywny sterownik.
-Komunikaty `Mowgli docking v3 limit` zawierają etap, błędy i obowiązujące limity.
+Komunikaty `Mowgli docking v4 limit` zawierają etap, błędy i obowiązujące limity.
 
 Nie zwiększaj `docking_distance`, tolerancji ani timeoutu w celu obejścia błędu.
 Jeśli zapisany kierunek lub koniec trasy nie odpowiada stacji, trzeba poprawić
@@ -93,7 +104,7 @@ docker inspect mowgli-openmower --format '{{.Config.Image}}'
 docker inspect mowgli-openmower --format '{{index .Config.Labels "io.mowgli.docking-fix"}}'
 ```
 
-Znacznik powinien mieć wartość `no-spin-v3`. Przy pierwszej próbie obserwuj
+Znacznik powinien mieć wartość `no-spin-v4`. Przy pierwszej próbie obserwuj
 dokowanie z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
 Sprawdź wjazd na styki, zatrzymanie po wykryciu ładowania oraz wyjazd tyłem.
 Przy błędnym ustawieniu oczekiwanym zachowaniem jest przerwanie próby,
@@ -108,8 +119,64 @@ docker exec mowgli-openmower bash -lc 'source /opt/ros/noetic/setup.bash; rospar
 Lista musi zawierać `DockingApproachFTCPlanner`. Podczas podejścia publikowany
 jest teraz `/move_base_flex/DockingApproachFTCPlanner/global_point`; podczas
 końcowego wjazdu `/move_base_flex/DockingFTCPlanner/global_point`.
-W logu pojawiają się komunikaty `Mowgli docking no-spin v3 initialized` oraz
-`Mowgli docking v3 plan`, wskazujące wybrany tryb.
+W logu pojawiają się komunikaty `Mowgli docking no-spin v4 initialized` oraz
+`Mowgli docking v4 plan`, wskazujące wybrany tryb.
+
+## Kierunek po restarcie poza stacją
+
+Oryginalny filtr pozycji zaczyna od `(0, 0, 0)` i oznacza kierunek jako poprawny,
+choć nieruchomy odbiornik GPS nie zna kierunku przodu robota. Poza stacją
+zapisany kierunek stacji nie jest automatycznie przywracany. Dlatego poprawka
+nie dodaje stałego obrotu o 180 stopni: taki obrót zepsułby poprawnie ustaloną
+orientację w innych miejscach.
+
+Użytkownik potwierdził, że podczas wyłączenia robot nie jest przestawiany ani
+obracany. Przy tym założeniu v4 zachowuje znany kierunek podczas postoju:
+
+- Kierunek musi najpierw zostać zainicjalizowany z pozycji stacji lub przez
+  istniejącą usługę ustawienia pozycji. Dowolne początkowe zero nie jest zapisywane
+  jako kierunek wiarygodny. Przy wykryciu świeżego napięcia ładowania w stanie
+  IDLE kierunek może być zainicjalizowany z zapisanego punktu stacji bez wyjazdu.
+- Po co najmniej 2 sekundach postoju, z niedawnym GPS i znanym kierunkiem,
+  zapisywany jest plik `$ROS_HOME/mowgli-heading-v1.txt` albo
+  `~/.ros/mowgli-heading-v1.txt`. Istniejący montowany katalog `./ros` zachowuje go
+  po odtworzeniu kontenera. Zapis odbywa się przez plik tymczasowy i zmianę nazwy.
+- Wykrycie ruchu usuwa poprzedni punkt postoju, aby restart w trakcie jazdy nie
+  odtworzył kierunku sprzed przejazdu. Po zatrzymaniu powstaje nowy zapis.
+- Po restarcie przywrócenie wymaga zapisu nie starszego niż 24 godziny, zgodnych
+  przesunięć anteny, postoju, świeżych danych prędkości i IMU, kalibracji żyroskopu
+  oraz 10 kolejnych świeżych pomiarów RTK Fixed, w promieniu 0,25 m od zapisanej
+  pozycji anteny. Aktualna pozycja jest przeliczana z uwzględnieniem przesunięcia
+  anteny. Nie jest przywracana dawna pozycja GPS.
+- Bez wiarygodnego zapisu lub przy odrzuceniu przywrócenia kierunek pozostaje
+  nieważny dla kontroli GPS. Wtedy wymagane jest ponowne ustawienie pozycji,
+  zamiast jazdy autonomicznej z arbitralnym kierunkiem zero.
+
+Pierwsze uruchomienie v4 wykonaj w prawidłowo ustawionej stacji. Po normalnym
+wyjeździe i odzyskaniu RTK zatrzymaj zadanie, poczekaj kilka sekund i sprawdź
+komunikat `Mowgli heading v4: stationary heading checkpoint saved.`
+Dopiero potem sprawdzaj restart poza stacją. Pomyślne przywrócenie potwierdza
+`Mowgli heading v4 restored after stationary GPS validation`.
+Próby wykonuj z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
+
+GPS nie wykryje ręcznego obrócenia robota w tym samym miejscu podczas wyłączenia.
+Jeżeli zostanie przestawiony, usuń zapis postoju i zainicjalizuj pozycję ponownie
+w stacji. Nie używaj tego mechanizmu bez założenia nieruchomości po wyłączeniu.
+Ustawienie `xbot_positioning/mowgli_restore_stationary_heading: false` we własnych
+parametrach przywraca poprzednią inicjalizację filtra; nie jest rozwiązaniem
+problemu nieznanego kierunku poza stacją.
+
+## Granice weryfikacji
+
+Sprawdzenia przed publikacją obejmują kompilację ARM64 i wiązanie bibliotek,
+testy C++ polityki ograniczeń oraz symulację regulatorów przy 20 Hz, z wartościami
+podanymi przez użytkownika. Model odtwarza błąd v3 i sprawdza dojście v4 do
+punktu przekazania, także z odchyleniami bocznymi z logów. Testy kierunku obejmują
+zapis, odczyt, przywrócenie oraz odrzucanie ruchu i niepoprawnych pomiarów.
+Nie zastępuje to weryfikacji fizycznego robota, przyczepności ani jakości GPS.
+
+Błędy `Network is unreachable` i niezgodne sumy kontrolne są osobnymi problemami
+łączności. Ta poprawka ich nie maskuje ani nie zmniejsza wymagań świeżości danych.
 
 ## Powrót do poprzedniego obrazu
 
