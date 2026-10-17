@@ -28,3 +28,12 @@ target_include_directories(mower_logic PRIVATE
     ${MOWER_SOURCE}/include ${FTC_SOURCE}/include /opt/open_mower_ros/devel/include
     ${catkin_INCLUDE_DIRS} ${CRYPTOPP_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
 target_link_libraries(mower_logic ftc_local_planner ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES} Eigen3::Eigen)
+
+set(POSITIONING_SOURCE /opt/open_mower_ros/src/lib/xbot_positioning)
+add_executable(xbot_positioning
+    ${POSITIONING_SOURCE}/src/xbot_positioning.cpp
+    ${POSITIONING_SOURCE}/src/xbot_positioning_core.cpp)
+target_include_directories(xbot_positioning PRIVATE
+    ${POSITIONING_SOURCE}/include /opt/open_mower_ros/devel/include
+    ${catkin_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIRS})
+target_link_libraries(xbot_positioning ${catkin_LIBRARIES} Eigen3::Eigen)
