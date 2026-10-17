@@ -19,6 +19,24 @@ inline bool valid_pose(double longitudinal, double lateral, double angle, double
            std::abs(lateral) <= max_lateral_error && std::abs(angle) <= max_angle_error;
 }
 
+inline bool valid_approach_pose(double longitudinal, double lateral, double angle, double follow_distance,
+                                double position_tolerance, double angle_tolerance) {
+    return std::isfinite(longitudinal) && std::isfinite(lateral) && std::isfinite(angle) &&
+           std::isfinite(follow_distance) && follow_distance > 0.0 &&
+           std::isfinite(position_tolerance) && position_tolerance > 0.0 &&
+           std::isfinite(angle_tolerance) && angle_tolerance > 0.0 &&
+           std::hypot(longitudinal, lateral) <= follow_distance &&
+           std::abs(lateral) <= position_tolerance && std::abs(angle) <= angle_tolerance;
+}
+
+inline bool approach_goal_reached(double distance, double angle, double position_tolerance, double angle_tolerance) {
+    return std::isfinite(distance) && distance >= 0.0 && std::isfinite(angle) &&
+           std::isfinite(position_tolerance) && position_tolerance > 0.0 &&
+           std::isfinite(angle_tolerance) && angle_tolerance > 0.0 &&
+           distance < std::min(position_tolerance, max_lateral_error) &&
+           std::abs(angle) < std::min(angle_tolerance, max_angle_error);
+}
+
 struct Command {
     double linear;
     double angular;

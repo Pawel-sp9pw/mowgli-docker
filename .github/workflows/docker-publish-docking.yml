@@ -5,6 +5,7 @@ on:
     branches:
       - fix/docking-no-spin
       - fix/docking-no-spin-v2
+      - fix/docking-no-spin-v3
       - mowgli-map-editor-fix
     paths:
       - 'docker/openmower-docking/**'
