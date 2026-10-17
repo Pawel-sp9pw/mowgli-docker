@@ -235,7 +235,13 @@ def patch(workspace):
         '#include "heading_ros.h"\n\nvoid onImu(const sensor_msgs::Imu::ConstPtr &msg) {')
     positioning = replace_once(positioning,
         "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());",
-        """    const double mowgli_imu_dt = (msg->header.stamp - last_imu.header.stamp).toSec();
+        """    // The first sample establishes the timestamp baseline; it is not a discontinuity.
+    if (last_imu.header.stamp.isZero())
+    {
+        last_imu = *msg;
+        return;
+    }
+    const double mowgli_imu_dt = (msg->header.stamp - last_imu.header.stamp).toSec();
     const auto mowgli_imu_action = mowgli_heading::classify_interval(mowgli_imu_dt);
     if (mowgli_imu_action == mowgli_heading::IntervalAction::Discard && ++mowgli_imu_discard_count <= 2)
     {
@@ -284,6 +290,13 @@ def patch(workspace):
         return;
     }""")
     positioning = replace_once(positioning, "    double dt = (msg->stamp - last_ticks.stamp).toSec();", """    double dt = (msg->stamp - last_ticks.stamp).toSec();
+    // No previous wheel timestamp exists on startup. Preserve a valid heading checkpoint.
+    if (last_ticks.stamp.isZero())
+    {
+        last_ticks = *msg;
+        mowgli_last_speed = ros::WallTime::now();
+        return;
+    }
     const auto mowgli_tick_action = mowgli_heading::classify_interval(dt);
     if (mowgli_tick_action == mowgli_heading::IntervalAction::Discard && ++mowgli_tick_discard_count <= 2)
     {
