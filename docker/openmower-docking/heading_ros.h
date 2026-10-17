@@ -2,6 +2,7 @@
 #define MOWGLI_HEADING_ROS_H
 
 #include "heading_checkpoint.h"
+#include <cerrno>
 #include <cstdlib>
 
 bool mowgli_restore_heading = true;
@@ -14,6 +15,20 @@ mowgli_heading::Checkpoint mowgli_saved_heading;
 ros::WallTime mowgli_stationary_since;
 ros::WallTime mowgli_last_heading_save;
 ros::WallTime mowgli_last_speed;
+
+bool mowgli_invalidate_heading_checkpoint() {
+    mowgli_heading_pending = false;
+    if (!mowgli_restore_heading || mowgli_heading_path.empty())
+        return true;
+    if (std::remove(mowgli_heading_path.c_str()) == 0 || errno == ENOENT) {
+        mowgli_heading_saved = false;
+        return true;
+    } else {
+        mowgli_heading_known = false;
+        ROS_ERROR_THROTTLE(5, "Mowgli heading v4: cannot invalidate old checkpoint; stop and repair persistent storage before restarting.");
+        return false;
+    }
+}
 
 void mowgli_initialize_heading(ros::NodeHandle &parameters) {
     parameters.param("mowgli_restore_stationary_heading", mowgli_restore_heading, true);
@@ -36,21 +51,20 @@ void mowgli_track_stationary(double angular_velocity) {
     if (!mowgli_restore_heading)
         return;
     const auto now = ros::WallTime::now();
-    if ((now - mowgli_last_speed).toSec() > 0.5) {
-        mowgli_stationary_since = ros::WallTime();
-        mowgli_heading_samples = 0;
-        return;
-    }
     if (!mowgli_heading::stationary(vx, angular_velocity)) {
         mowgli_stationary_since = ros::WallTime();
         mowgli_heading_samples = 0;
         if (mowgli_heading_pending)
             ROS_ERROR("Mowgli heading v4: startup motion; saved heading rejected.");
-        mowgli_heading_pending = false;
-        if (mowgli_heading_saved) {
-            std::remove(mowgli_heading_path.c_str());
-            mowgli_heading_saved = false;
-        }
+        if (mowgli_heading_pending || mowgli_heading_saved)
+            mowgli_invalidate_heading_checkpoint();
+        return;
+    }
+    if ((now - mowgli_last_speed).toSec() > 0.5) {
+        mowgli_stationary_since = ros::WallTime();
+        mowgli_heading_samples = 0;
+        if (!mowgli_last_speed.isZero() && (mowgli_heading_pending || mowgli_heading_saved))
+            mowgli_invalidate_heading_checkpoint();
         return;
     }
     if (mowgli_stationary_since.isZero())

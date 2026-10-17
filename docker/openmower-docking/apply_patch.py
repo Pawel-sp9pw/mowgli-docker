@@ -235,8 +235,23 @@ def patch(workspace):
         '#include "heading_ros.h"\n\nvoid onImu(const sensor_msgs::Imu::ConstPtr &msg) {')
     positioning = replace_once(positioning,
         "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());",
-        "    mowgli_track_stationary(msg->angular_velocity.z - gyro_offset);\n"
-        "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());")
+        """    const double mowgli_imu_dt = (msg->header.stamp - last_imu.header.stamp).toSec();
+    if (!std::isfinite(mowgli_imu_dt) || mowgli_imu_dt <= 0.0 || mowgli_imu_dt > 0.5)
+    {
+        last_imu = *msg;
+        if (mowgli_restore_heading)
+        {
+            mowgli_invalidate_heading_checkpoint();
+            mowgli_heading_known = false;
+        }
+        ROS_ERROR_THROTTLE(5, "Mowgli heading v4: invalid IMU interval; initialize heading again.");
+        return;
+    }
+    mowgli_track_stationary(msg->angular_velocity.z - gyro_offset);
+    core.predict(vx, msg->angular_velocity.z - gyro_offset, mowgli_imu_dt);""")
+    positioning = replace_once(positioning,
+        '            ROS_WARN("Skipped gyro calibration");\n            has_gyro = true;',
+        '            ROS_WARN("Skipped gyro calibration");\n            last_imu = *msg;\n            has_gyro = true;')
     positioning = replace_once(positioning, "    xb_absolute_pose_msg.orientation_valid = true;",
         "    xb_absolute_pose_msg.orientation_valid = !mowgli_restore_heading || mowgli_heading_known;")
     positioning = replace_once(positioning, "    vx = d_ticks / dt;",
@@ -249,6 +264,8 @@ def patch(workspace):
     positioning = replace_once(positioning, "    core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);",
         """    if (!std::isfinite(req.robot_pose.position.x) || !std::isfinite(req.robot_pose.position.y) ||
         !std::isfinite(yaw))
+        return false;
+    if (!mowgli_invalidate_heading_checkpoint())
         return false;
     core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);
     mowgli_heading_known = true;

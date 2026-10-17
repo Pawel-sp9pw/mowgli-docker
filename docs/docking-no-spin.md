@@ -143,6 +143,9 @@ obracany. Przy tym założeniu v4 zachowuje znany kierunek podczas postoju:
   po odtworzeniu kontenera. Zapis odbywa się przez plik tymczasowy i zmianę nazwy.
 - Wykrycie ruchu usuwa poprzedni punkt postoju, aby restart w trakcie jazdy nie
   odtworzył kierunku sprzed przejazdu. Po zatrzymaniu powstaje nowy zapis.
+  Zanik wcześniej dostępnych danych prędkości również unieważnia zapis, a ruch
+  obrotowy jest sprawdzany niezależnie od dostępności prędkości liniowej.
+  Jawne ustawienie pozycji usuwa poprzedni zapis kierunku.
 - Po restarcie przywrócenie wymaga zapisu nie starszego niż 24 godziny, zgodnych
   przesunięć anteny, postoju, świeżych danych prędkości i IMU, kalibracji żyroskopu
   oraz 10 kolejnych świeżych pomiarów RTK Fixed, w promieniu 0,25 m od zapisanej
@@ -151,6 +154,11 @@ obracany. Przy tym założeniu v4 zachowuje znany kierunek podczas postoju:
 - Bez wiarygodnego zapisu lub przy odrzuceniu przywrócenia kierunek pozostaje
   nieważny dla kontroli GPS. Wtedy wymagane jest ponowne ustawienie pozycji,
   zamiast jazdy autonomicznej z arbitralnym kierunkiem zero.
+
+Przy pomijaniu kalibracji żyroskopu pierwszy znacznik czasu IMU jest teraz
+inicjalizowany przed prognozą filtra. Niepoprawny lub dłuższy niż 0,5 s odstęp
+między pomiarami IMU nie jest całkowany i unieważnia znany kierunek oraz zapis.
+Nie wolno zapisywać ani przywracać kierunku po nieobserwowanym ruchu.
 
 Pierwsze uruchomienie v4 wykonaj w prawidłowo ustawionej stacji. Po normalnym
 wyjeździe i odzyskaniu RTK zatrzymaj zadanie, poczekaj kilka sekund i sprawdź
