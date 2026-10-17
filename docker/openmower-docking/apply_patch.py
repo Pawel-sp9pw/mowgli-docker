@@ -45,7 +45,7 @@ def patch(workspace):
         mowgli_docking_enabled = mowgli_docking_enabled &&
             (name == "DockingFTCPlanner" || mowgli_approach_controller);
         if (mowgli_docking_enabled)
-            ROS_WARN_STREAM("Mowgli docking no-spin v4 initialized: " << name);""")
+            ROS_WARN_STREAM("Mowgli docking no-spin v5 initialized: " << name);""")
     source = replace_once(source,
         '        global_plan_pub = private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);',
         """        global_plan_pub = name == "FTCPlanner" ? mowgli_compatible_plan_publisher() :
@@ -82,7 +82,7 @@ def patch(workspace):
             mowgli_docking_active = straight_forward && previous_forward > 0.0;
         }
         if (mowgli_docking_active || mowgli_approach_controller)
-            ROS_WARN_STREAM("Mowgli docking v4 plan: approach=" << mowgli_approach_controller
+            ROS_WARN_STREAM("Mowgli docking v5 plan: approach=" << mowgli_approach_controller
                 << ", straight_no_spin=" << mowgli_docking_active);
         global_plan = plan;""")
     source = replace_once(source, "        update_control_point(dt);", """        if ((mowgli_docking_active || mowgli_approach_controller) &&
@@ -106,7 +106,7 @@ def patch(workspace):
             mowgli_docking::valid_pose(lon_error, lat_error, angle_error, config.max_follow_distance);
         if (mowgli_docking_active && !valid_docking_pose)
         {
-            ROS_ERROR_STREAM("Mowgli docking v4 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
+            ROS_ERROR_STREAM("Mowgli docking v5 limit: stage=" << (mowgli_approach_controller ? "approach" : "entry")
                 << ", lon=" << lon_error << ", lat=" << lat_error
                 << ", angle_deg=" << angle_error * (180.0 / M_PI)
                 << ", follow_limit=" << config.max_follow_distance
@@ -152,7 +152,7 @@ def patch(workspace):
                     return FINISHED;
                 if (time_in_current_state() > config.goal_timeout || lon_error <= 0.0)
                 {
-                    ROS_ERROR_STREAM("Mowgli docking v4 final pose not reached: approach=" << mowgli_approach_controller
+                    ROS_ERROR_STREAM("Mowgli docking v5 final pose not reached: approach=" << mowgli_approach_controller
                         << ", distance=" << distance << ", lon=" << lon_error << ", lat=" << lat_error
                         << ", angle_deg=" << angle_error * (180.0 / M_PI));
                     is_crashed = true;
@@ -236,17 +236,30 @@ def patch(workspace):
     positioning = replace_once(positioning,
         "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());",
         """    const double mowgli_imu_dt = (msg->header.stamp - last_imu.header.stamp).toSec();
-    if (!std::isfinite(mowgli_imu_dt) || mowgli_imu_dt <= 0.0 || mowgli_imu_dt > 0.5)
+    const auto mowgli_imu_action = mowgli_heading::classify_interval(mowgli_imu_dt);
+    if (mowgli_imu_action == mowgli_heading::IntervalAction::Discard && ++mowgli_imu_discard_count <= 2)
+    {
+        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v5: dropped IMU sample; dt=" << mowgli_imu_dt
+            << ", stamp=" << msg->header.stamp.toSec()
+            << ", last=" << last_imu.header.stamp.toSec());
+        return;
+    }
+    if (mowgli_imu_action != mowgli_heading::IntervalAction::Integrate ||
+        !std::isfinite(msg->angular_velocity.z) || !std::isfinite(vx))
     {
         last_imu = *msg;
+        mowgli_imu_discard_count = 0;
         if (mowgli_restore_heading)
         {
             mowgli_invalidate_heading_checkpoint();
             mowgli_heading_known = false;
         }
-        ROS_ERROR_THROTTLE(5, "Mowgli heading v4: invalid IMU interval; initialize heading again.");
+        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v5: IMU discontinuity; dt=" << mowgli_imu_dt
+            << ", stamp=" << msg->header.stamp.toSec()
+            << "; heading invalid, initialize at dock.");
         return;
     }
+    mowgli_imu_discard_count = 0;
     mowgli_track_stationary(msg->angular_velocity.z - gyro_offset);
     core.predict(vx, msg->angular_velocity.z - gyro_offset, mowgli_imu_dt);""")
     positioning = replace_once(positioning,
@@ -254,8 +267,54 @@ def patch(workspace):
         '            ROS_WARN("Skipped gyro calibration");\n            last_imu = *msg;\n            has_gyro = true;')
     positioning = replace_once(positioning, "    xb_absolute_pose_msg.orientation_valid = true;",
         "    xb_absolute_pose_msg.orientation_valid = !mowgli_restore_heading || mowgli_heading_known;")
-    positioning = replace_once(positioning, "    vx = d_ticks / dt;",
-        "    vx = d_ticks / dt;\n    mowgli_last_speed = ros::WallTime::now();")
+    positioning = replace_once(positioning, "void onWheelTicks(const xbot_msgs::WheelTick::ConstPtr &msg) {", """void onWheelTicks(const xbot_msgs::WheelTick::ConstPtr &msg) {
+    const int mowgli_rear_wheels = xbot_msgs::WheelTick::WHEEL_VALID_RL | xbot_msgs::WheelTick::WHEEL_VALID_RR;
+    if (msg->wheel_tick_factor == 0 || (msg->valid_wheels & mowgli_rear_wheels) != mowgli_rear_wheels)
+    {
+        has_ticks = false;
+        vx = 0.0;
+        mowgli_last_speed = ros::WallTime();
+        if (mowgli_restore_heading)
+        {
+            mowgli_invalidate_heading_checkpoint();
+            mowgli_heading_known = false;
+        }
+        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v5: invalid wheel data; factor=" << msg->wheel_tick_factor
+            << ", valid_wheels=" << int(msg->valid_wheels));
+        return;
+    }""")
+    positioning = replace_once(positioning, "    double dt = (msg->stamp - last_ticks.stamp).toSec();", """    double dt = (msg->stamp - last_ticks.stamp).toSec();
+    const auto mowgli_tick_action = mowgli_heading::classify_interval(dt);
+    if (mowgli_tick_action == mowgli_heading::IntervalAction::Discard && ++mowgli_tick_discard_count <= 2)
+    {
+        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v5: dropped wheel sample; dt=" << dt);
+        return;
+    }
+    if (mowgli_tick_action != mowgli_heading::IntervalAction::Integrate)
+    {
+        last_ticks = *msg;
+        mowgli_tick_discard_count = 0;
+        vx = 0.0;
+        mowgli_last_speed = ros::WallTime();
+        if (mowgli_restore_heading)
+        {
+            mowgli_invalidate_heading_checkpoint();
+            mowgli_heading_known = false;
+        }
+        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v5: invalid wheel sample; dt=" << dt
+            << ", factor=" << msg->wheel_tick_factor << ", valid_wheels=" << int(msg->valid_wheels));
+        return;
+    }""")
+    positioning = replace_once(positioning, "    vx = d_ticks / dt;", """    mowgli_tick_discard_count = 0;
+    if (mowgli_restore_heading && (d_wheel_l != 0.0 || d_wheel_r != 0.0))
+    {
+        mowgli_stationary_since = ros::WallTime();
+        mowgli_heading_samples = 0;
+        if (mowgli_heading_pending || mowgli_heading_saved)
+            mowgli_invalidate_heading_checkpoint();
+    }
+    vx = d_ticks / dt;
+    mowgli_last_speed = ros::WallTime::now();""")
     positioning = replace_once(positioning, "    vx = msg->twist.linear.x;",
         "    vx = msg->twist.linear.x;\n    mowgli_last_speed = ros::WallTime::now();")
     positioning = replace_once(positioning, "    tf2::Matrix3x3 m(q);",
@@ -278,17 +337,18 @@ def patch(workspace):
     idle_path = workspace / "src/mower_logic/src/mower_logic/behaviors/IdleBehavior.cpp"
     idle = replace_once(idle_path.read_text(), "extern mower_msgs::Power getPower();",
         "extern mower_msgs::Power getPower();\nextern xbot_msgs::AbsolutePose getPose();")
-    idle = replace_once(idle, "  ros::Rate r(25);", "  bool mowgli_dock_pose_initialized = false;\n  ros::Rate r(25);")
+    idle = replace_once(idle, "  ros::Rate r(25);", "  ros::WallTime mowgli_last_dock_init;\n  ros::Rate r(25);")
     idle = replace_once(idle,
         "    const float last_charge_v = utils::GetFirstValid({last_power.charge_voltage_adc, last_power.charge_voltage});",
         """    const float last_charge_v = utils::GetFirstValid({last_power.charge_voltage_adc, last_power.charge_voltage});
     const double mowgli_power_age = (ros::Time::now() - last_power.stamp).toSec();
-    if (!mowgli_dock_pose_initialized && !getPose().orientation_valid &&
+    if (!getPose().orientation_valid &&
+        (ros::WallTime::now() - mowgli_last_dock_init).toSec() >= 2.0 &&
         last_charge_v > 5.0 && mowgli_power_age >= 0.0 && mowgli_power_age < 1.0)
     {
       setRobotPose(docking_pose_stamped.pose);
-      mowgli_dock_pose_initialized = true;
-      ROS_WARN("Mowgli heading v4: initialized heading from the charging dock.");
+      mowgli_last_dock_init = ros::WallTime::now();
+      ROS_WARN("Mowgli heading v5: initialized heading from the charging dock.");
     }""")
 
     header_path.write_text(header)

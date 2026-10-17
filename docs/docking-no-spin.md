@@ -5,7 +5,7 @@ Obraz bazowy przypięto do manifestu
 `sha256:8b3336582fa2351254632f3b904ba302f35eeca6ddd68c712e6d4d0605f5cd8e`.
 Jego wariant ARM64 ma identyfikator konfiguracji
 `sha256:46270817c3302d6d1e1d7786af247a5ca87141d0b853c30b1f9deecc315f2cfe`,
-zgodny z odczytem z kosiarki. Wersja v4 zastępuje bibliotekę FTC, program
+zgodny z odczytem z kosiarki. Wersja v5 zastępuje bibliotekę FTC, program
 `mower_logic` oraz `xbot_positioning`. Nie zmienia map ani parametrów sprzętu.
 
 ## Zachowanie
@@ -69,7 +69,7 @@ Trasa podejścia jest publikowana także pod dotychczasowym
 Oba sterowniki korzystają z tego samego zatrzaskiwanego wydawcy, aby po ponownym
 połączeniu podgląd nie wybierał pomiędzy dwiema nieaktualnymi kopiami trasy.
 Tematy `global_point` pozostają oddzielne i wskazują rzeczywiście aktywny sterownik.
-Komunikaty `Mowgli docking v4 limit` zawierają etap, błędy i obowiązujące limity.
+Komunikaty `Mowgli docking v5 limit` zawierają etap, błędy i obowiązujące limity.
 
 Nie zwiększaj `docking_distance`, tolerancji ani timeoutu w celu obejścia błędu.
 Jeśli zapisany kierunek lub koniec trasy nie odpowiada stacji, trzeba poprawić
@@ -104,7 +104,7 @@ docker inspect mowgli-openmower --format '{{.Config.Image}}'
 docker inspect mowgli-openmower --format '{{index .Config.Labels "io.mowgli.docking-fix"}}'
 ```
 
-Znacznik powinien mieć wartość `no-spin-v4`. Przy pierwszej próbie obserwuj
+Znacznik powinien mieć wartość `no-spin-v5`. Przy pierwszej próbie obserwuj
 dokowanie z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
 Sprawdź wjazd na styki, zatrzymanie po wykryciu ładowania oraz wyjazd tyłem.
 Przy błędnym ustawieniu oczekiwanym zachowaniem jest przerwanie próby,
@@ -119,8 +119,50 @@ docker exec mowgli-openmower bash -lc 'source /opt/ros/noetic/setup.bash; rospar
 Lista musi zawierać `DockingApproachFTCPlanner`. Podczas podejścia publikowany
 jest teraz `/move_base_flex/DockingApproachFTCPlanner/global_point`; podczas
 końcowego wjazdu `/move_base_flex/DockingFTCPlanner/global_point`.
-W logu pojawiają się komunikaty `Mowgli docking no-spin v4 initialized` oraz
-`Mowgli docking v4 plan`, wskazujące wybrany tryb.
+W logu pojawiają się komunikaty `Mowgli docking no-spin v5 initialized` oraz
+`Mowgli docking v5 plan`, wskazujące wybrany tryb.
+
+## Korekta blokady kierunku w v5
+
+Na urządzeniu potwierdzono rzeczywisty pomiar ruchu z
+`/xbot_positioning/wheel_ticks_in`, około 47,5 Hz także na postoju.
+`wheel_tick_factor=330`, `valid_wheels=12` i kolejne znaczniki czasu co 21 ms
+są poprawne; niezmienne liczniki tylnych kół potwierdzają postój w tej próbce.
+Brak publikacji `/ll/diff_drive/measured_twist` jest w tej instalacji normalny:
+już v4 odświeżała pomiar prędkości również z enkoderów. Nie trzeba dodawać
+przekierowania, a `/cmd_vel` nie jest pomiarem ruchu.
+
+W v4 każdy niepoprawny odstęp IMU usuwał zapis i unieważniał kierunek, także
+pojedynczy duplikat. Powrót dobrych danych nie przywracał ważności. Ponadto
+inicjalizacja z ładującej stacji w IDLE mogła wykonać się tylko raz na wejście
+do tego stanu. To powodowało blokadę również po kolejnej utracie kierunku.
+Najnowsze pomiary nie odtwarzają wcześniejszego zdarzenia: samo stare ostrzeżenie
+nie pozwala ustalić, czy nastąpił duplikat, cofnięcie czasu czy długa przerwa.
+
+W v5:
+
+- Pojedyncze duplikaty i lekko spóźnione próbki IMU/enkoderów są odrzucane,
+  bez cofania ostatniego poprawnego znacznika czasu, podwójnej integracji ani
+  dzielenia przez zero. Nie kasują znanego kierunku.
+- Trzecia kolejna próbka bez postępu czasu, przerwa ponad 0,5 s, cofnięcie
+  czasu o ponad 0,5 s lub niepoprawne wartości nadal unieważniają kierunek.
+  Świeże pomiary po rzeczywistej utracie danych nie uprawniają do jazdy
+  z nieznanym kierunkiem. Wymagana jest ponowna inicjalizacja.
+- Enkodery wymagają niezerowego przelicznika i obu ważnych tylnych kół.
+  Ruch któregokolwiek tylnego koła usuwa zapis postoju również wtedy, gdy
+  przeciwne obroty dają zerową średnią prędkość liniową.
+- W stanie IDLE, przy świeżym napięciu ładowania i nieważnym kierunku, ustawienie
+  pozycji ze stacji może być ponowione, nie częściej niż co 2 s. Nie ma takiej
+  automatycznej inicjalizacji poza stacją.
+- Komunikaty `dropped IMU sample`, `IMU discontinuity`, `dropped wheel sample`
+  i `invalid wheel sample` podają rzeczywiste `dt`. `seq: 0` nie jest kryterium
+  błędu; oceniane są znaczniki czasu, nie numer sekwencji.
+
+Po przejściu z v4 z `orientation_valid=0` zatrzymaj zadanie i ustaw robot
+prawidłowo w ładującej stacji. Oczekuj komunikatu
+`Mowgli heading v5: initialized heading from the charging dock.`
+Następnie sprawdź `orientation_valid` po nadejściu świeżych danych IMU.
+Ta aktualizacja nie naprawia błędów sieci i sum kontrolnych transmisji.
 
 ## Kierunek po restarcie poza stacją
 
@@ -131,7 +173,7 @@ nie dodaje stałego obrotu o 180 stopni: taki obrót zepsułby poprawnie ustalon
 orientację w innych miejscach.
 
 Użytkownik potwierdził, że podczas wyłączenia robot nie jest przestawiany ani
-obracany. Przy tym założeniu v4 zachowuje znany kierunek podczas postoju:
+obracany. Przy tym założeniu v5 zachowuje znany kierunek podczas postoju:
 
 - Kierunek musi najpierw zostać zainicjalizowany z pozycji stacji lub przez
   istniejącą usługę ustawienia pozycji. Dowolne początkowe zero nie jest zapisywane
@@ -156,15 +198,15 @@ obracany. Przy tym założeniu v4 zachowuje znany kierunek podczas postoju:
   zamiast jazdy autonomicznej z arbitralnym kierunkiem zero.
 
 Przy pomijaniu kalibracji żyroskopu pierwszy znacznik czasu IMU jest teraz
-inicjalizowany przed prognozą filtra. Niepoprawny lub dłuższy niż 0,5 s odstęp
-między pomiarami IMU nie jest całkowany i unieważnia znany kierunek oraz zapis.
+inicjalizowany przed prognozą filtra. Niepoprawne odstępy nie są całkowane;
+rozróżnienie duplikatów i rzeczywistej utraty danych opisano w sekcji v5.
 Nie wolno zapisywać ani przywracać kierunku po nieobserwowanym ruchu.
 
-Pierwsze uruchomienie v4 wykonaj w prawidłowo ustawionej stacji. Po normalnym
+Pierwsze uruchomienie v5 wykonaj w prawidłowo ustawionej stacji. Po normalnym
 wyjeździe i odzyskaniu RTK zatrzymaj zadanie, poczekaj kilka sekund i sprawdź
-komunikat `Mowgli heading v4: stationary heading checkpoint saved.`
+komunikat `Mowgli heading v5: stationary heading checkpoint saved.`
 Dopiero potem sprawdzaj restart poza stacją. Pomyślne przywrócenie potwierdza
-`Mowgli heading v4 restored after stationary GPS validation`.
+`Mowgli heading v5 restored after stationary GPS validation`.
 Próby wykonuj z wyłączonym nożem i możliwością natychmiastowego zatrzymania.
 
 GPS nie wykryje ręcznego obrócenia robota w tym samym miejscu podczas wyłączenia.
@@ -181,6 +223,10 @@ testy C++ polityki ograniczeń oraz symulację regulatorów przy 20 Hz, z warto�
 podanymi przez użytkownika. Model odtwarza błąd v3 i sprawdza dojście v4 do
 punktu przekazania, także z odchyleniami bocznymi z logów. Testy kierunku obejmują
 zapis, odczyt, przywrócenie oraz odrzucanie ruchu i niepoprawnych pomiarów.
+Dla v5 lokalne testy C++ wykonują także fragment obsługi IMU i pełny callback
+enkoderów wygenerowane przez ten sam skrypt, który modyfikuje obraz bazowy.
+Sprawdzane są duplikaty, opóźnione próbki, powtarzające się błędy czasu, realne
+przerwy, niepoprawny przelicznik, maska kół oraz dane postoju z urządzenia.
 Nie zastępuje to weryfikacji fizycznego robota, przyczepności ani jakości GPS.
 
 Błędy `Network is unreachable` i niezgodne sumy kontrolne są osobnymi problemami
