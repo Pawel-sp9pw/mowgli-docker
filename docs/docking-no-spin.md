@@ -14,6 +14,9 @@ Końcowy wjazd nadal używa `DockingFTCPlanner`. Oba wcześniejsze etapy podejś
 używają teraz `DockingApproachFTCPlanner`, zarejestrowanego w obrazie.
 Przy uruchomieniu nowy sterownik kopiuje rzeczywiste ustawienia `FTCPlanner`,
 więc nie trzeba zastępować własnego pliku `custom_params.yaml`.
+Przed startem nawigacji rejestracja dopisuje go do efektywnej listy sterowników,
+także jeśli własny `custom_params.yaml` nadpisuje listę z obrazu. Pozostałe wpisy
+są zachowane; konflikt nazwy nowego sterownika zatrzymuje start nawigacji.
 Zwykły `FTCPlanner` podczas koszenia i wyjazd tyłem ze stacji zachowują
 dotychczasowe działanie. Tryb jest wybierany ponownie dla każdego planu.
 

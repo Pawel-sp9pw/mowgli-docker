@@ -180,10 +180,17 @@ def patch(workspace):
     params = replace_once(params, controller_entry, controller_entry +
         "\n  - name: DockingApproachFTCPlanner\n    type: ftc_local_planner/FTCPlanner")
 
+    launch_path = workspace / "src/open_mower/launch/include/_move_base.launch"
+    launch = replace_once(launch_path.read_text(),
+        '<node name="move_base_flex" pkg="mbf_costmap_nav"',
+        '<node launch-prefix="/usr/bin/python3 /opt/mowgli-docking/register_controller.py" '
+        'name="move_base_flex" pkg="mbf_costmap_nav"')
+
     header_path.write_text(header)
     source_path.write_text(source)
     behavior_path.write_text(behavior)
     params_path.write_text(params)
+    launch_path.write_text(launch)
     helper = Path(__file__).with_name("docking_control.h").read_text()
     (header_path.parent / "docking_control.h").write_text(helper)
 
