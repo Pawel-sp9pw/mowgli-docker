@@ -10,6 +10,8 @@ bool mowgli_heading_known = false;
 bool mowgli_heading_pending = false;
 bool mowgli_heading_saved = false;
 int mowgli_heading_samples = 0;
+int mowgli_imu_discard_count = 0;
+int mowgli_tick_discard_count = 0;
 std::string mowgli_heading_path;
 mowgli_heading::Checkpoint mowgli_saved_heading;
 ros::WallTime mowgli_stationary_since;
@@ -25,7 +27,7 @@ bool mowgli_invalidate_heading_checkpoint() {
         return true;
     } else {
         mowgli_heading_known = false;
-        ROS_ERROR_THROTTLE(5, "Mowgli heading v4: cannot invalidate old checkpoint; stop and repair persistent storage before restarting.");
+        ROS_ERROR_THROTTLE(5, "Mowgli heading v5: cannot invalidate old checkpoint; stop and repair persistent storage before restarting.");
         return false;
     }
 }
@@ -41,10 +43,10 @@ void mowgli_initialize_heading(ros::NodeHandle &parameters) {
     mowgli_heading_pending = mowgli_heading::read(
         mowgli_heading_path, mowgli_saved_heading, ros::WallTime::now().toSec());
     mowgli_heading_saved = mowgli_heading_pending;
-    ROS_WARN_STREAM("Mowgli heading v4: checkpoint=" << mowgli_heading_pending
+    ROS_WARN_STREAM("Mowgli heading v5: checkpoint=" << mowgli_heading_pending
         << "; restore requires unchanged physical heading while powered off.");
     if (!mowgli_heading_pending)
-        ROS_WARN("Mowgli heading v4: no valid stationary checkpoint; initialize pose at the dock before autonomous travel.");
+        ROS_WARN("Mowgli heading v5: no valid stationary checkpoint; initialize pose at the dock before autonomous travel.");
 }
 
 void mowgli_track_stationary(double angular_velocity) {
@@ -55,7 +57,7 @@ void mowgli_track_stationary(double angular_velocity) {
         mowgli_stationary_since = ros::WallTime();
         mowgli_heading_samples = 0;
         if (mowgli_heading_pending)
-            ROS_ERROR("Mowgli heading v4: startup motion; saved heading rejected.");
+            ROS_ERROR("Mowgli heading v5: startup motion; saved heading rejected.");
         if (mowgli_heading_pending || mowgli_heading_saved)
             mowgli_invalidate_heading_checkpoint();
         return;
@@ -88,9 +90,9 @@ void mowgli_track_stationary(double angular_velocity) {
     mowgli_last_heading_save = now;
     if (mowgli_heading::write(mowgli_heading_path, checkpoint)) {
         mowgli_heading_saved = true;
-        ROS_INFO_THROTTLE(30, "Mowgli heading v4: stationary heading checkpoint saved.");
+        ROS_INFO_THROTTLE(30, "Mowgli heading v5: stationary heading checkpoint saved.");
     } else {
-        ROS_ERROR_THROTTLE(30, "Mowgli heading v4: checkpoint write failed; restart heading will not be restored.");
+        ROS_ERROR_THROTTLE(30, "Mowgli heading v5: checkpoint write failed; restart heading will not be restored.");
     }
 }
 
@@ -114,7 +116,7 @@ void mowgli_try_restore_heading(const xbot_msgs::AbsolutePose &gps) {
     if (!mowgli_heading::matches(mowgli_saved_heading, gps.pose.pose.position.x, gps.pose.pose.position.y,
                                  antenna_offset_x, antenna_offset_y, ros::WallTime::now().toSec())) {
         mowgli_heading_pending = false;
-        ROS_ERROR("Mowgli heading v4: checkpoint position, antenna configuration or age mismatch; initialize pose again.");
+        ROS_ERROR("Mowgli heading v5: checkpoint position, antenna configuration or age mismatch; initialize pose again.");
         return;
     }
     if (++mowgli_heading_samples < 10)
@@ -125,7 +127,7 @@ void mowgli_try_restore_heading(const xbot_msgs::AbsolutePose &gps) {
     core.setState(base_x, base_y, yaw, 0.0, 0.0);
     mowgli_heading_known = true;
     mowgli_heading_pending = false;
-    ROS_WARN_STREAM("Mowgli heading v4 restored after stationary GPS validation: yaw_deg=" << yaw * (180.0 / std::acos(-1.0)));
+    ROS_WARN_STREAM("Mowgli heading v5 restored after stationary GPS validation: yaw_deg=" << yaw * (180.0 / std::acos(-1.0)));
 }
 
 #endif

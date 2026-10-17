@@ -9,6 +9,16 @@
 
 namespace mowgli_heading {
 
+enum class IntervalAction { Integrate, Discard, Reset };
+
+inline IntervalAction classify_interval(double interval) {
+    if (!std::isfinite(interval) || interval > 0.5 || interval < -0.5)
+        return IntervalAction::Reset;
+    if (interval <= 0.0)
+        return IntervalAction::Discard;
+    return IntervalAction::Integrate;
+}
+
 struct Checkpoint {
     double saved_at = 0.0;
     double gps_x = 0.0;
