@@ -161,6 +161,11 @@ docker compose -f docker-compose.remote.pi.yaml up -d
 
 ## Usage
 
+### Docking without in-place rotation
+
+For the ARM64 jeremysalwen-based runtime, see the opt-in
+[docking no-spin fix](docs/docking-no-spin.md), including deployment and rollback.
+
 ### Buttons
 
 You can use the scripts in [./utils](./utils) directory to press home / start

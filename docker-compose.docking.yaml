@@ -1,0 +1,6 @@
+services:
+  openmower:
+    image: ${DOCKING_IMAGE:-ghcr.io/pawel-sp9pw/mowgli-docker:docking-no-spin}
+    build:
+      context: .
+      dockerfile: docker/openmower-docking/Dockerfile

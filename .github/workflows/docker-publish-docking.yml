@@ -1,0 +1,60 @@
+name: Build docking no-spin fix
+
+on:
+  push:
+    branches:
+      - fix/docking-no-spin
+      - mowgli-map-editor-fix
+    paths:
+      - 'docker/openmower-docking/**'
+      - 'docker-compose.docking.yaml'
+      - '.github/workflows/docker-publish-docking.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    env:
+      IMAGE_NAME: ghcr.io/pawel-sp9pw/mowgli-docker
+    steps:
+      - name: Checkout repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c http.extraheader="${auth_header}" fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Validate Compose override
+        run: docker compose -f docker-compose.yaml -f docker-compose.docking.yaml config --quiet
+
+      - name: Build ARM64 image
+        run: |
+          docker build --file docker/openmower-docking/Dockerfile \
+            --tag "${IMAGE_NAME}:docking-${GITHUB_SHA}" \
+            --tag "${IMAGE_NAME}:docking-no-spin" .
+
+      - name: Check runtime library
+        run: |
+          docker run --rm --entrypoint bash "${IMAGE_NAME}:docking-${GITHUB_SHA}" -c '
+            source /opt/ros/noetic/setup.bash
+            source /opt/open_mower_ros/devel/setup.bash
+            ldd -r /opt/open_mower_ros/devel/lib/libftc_local_planner.so > /tmp/link-check
+            cat /tmp/link-check
+            ! grep -E "not found|undefined symbol" /tmp/link-check
+          '
+
+      - name: Publish image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          docker push "${IMAGE_NAME}:docking-${GITHUB_SHA}"
+          docker push "${IMAGE_NAME}:docking-no-spin"
