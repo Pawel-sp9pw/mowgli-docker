@@ -22,7 +22,15 @@ jobs:
       IMAGE_NAME: ghcr.io/pawel-sp9pw/mowgli-docker
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          git -c http.extraheader="${auth_header}" fetch --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
 
       - name: Validate Compose override
         run: docker compose -f docker-compose.yaml -f docker-compose.docking.yaml config --quiet
