@@ -267,7 +267,8 @@ def patch(workspace):
     }
     mowgli_imu_discard_count = 0;
     mowgli_track_stationary(msg->angular_velocity.z - gyro_offset);
-    core.predict(vx, msg->angular_velocity.z - gyro_offset, mowgli_imu_dt);""")
+    core.predict(vx, msg->angular_velocity.z - gyro_offset, mowgli_imu_dt);
+    mowgli_snapshot_heading_if_tracked();""")
     positioning = replace_once(positioning,
         '            ROS_WARN("Skipped gyro calibration");\n            has_gyro = true;',
         '            ROS_WARN("Skipped gyro calibration");\n            last_imu = *msg;\n            has_gyro = true;')
@@ -341,10 +342,14 @@ def patch(workspace):
         return false;
     core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);
     mowgli_heading_known = true;
+    mowgli_heading_anchor_time = ros::WallTime::now();
     mowgli_heading_pending = false;""")
     positioning = replace_once(positioning, "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {",
         "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {\n"
-        "    if (mowgli_observe_raw_gps(*msg))\n        mowgli_try_restore_heading(*msg);")
+        "    if (mowgli_observe_raw_gps(*msg)) {\n"
+        "        mowgli_try_restore_heading(*msg);\n"
+        "        if (mowgli_heading_known) mowgli_heading_anchor_time = ros::WallTime::now();\n"
+        "    }")
     positioning = replace_once(positioning, "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);",
         "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);\n    mowgli_initialize_heading(paramNh);")
 
