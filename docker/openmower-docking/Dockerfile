@@ -20,6 +20,9 @@ COPY --from=build /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/
 COPY --from=build /opt/open_mower_ros/src/open_mower/params/move_base_flex.yaml /opt/open_mower_ros/src/open_mower/params/move_base_flex.yaml
 COPY --from=build /opt/open_mower_ros/src/open_mower/launch/include/_move_base.launch /opt/open_mower_ros/src/open_mower/launch/include/_move_base.launch
 COPY docker/openmower-docking/register_controller.py /opt/mowgli-docking/register_controller.py
+COPY docker/openmower-docking/gps_watchdog.py /opt/open_mower_ros/src/open_mower/scripts/gps_watchdog.py
+COPY --from=build /opt/open_mower_ros/src/open_mower/launch/include/_comms.launch /opt/open_mower_ros/src/open_mower/launch/include/_comms.launch
+RUN chmod +x /opt/open_mower_ros/src/open_mower/scripts/gps_watchdog.py
 COPY docker/openmower-docking/docking_control.h /opt/open_mower_ros/src/lib/ftc_local_planner/include/ftc_local_planner/docking_control.h
 LABEL io.mowgli.docking-fix="no-spin-v6"
 USER openmower

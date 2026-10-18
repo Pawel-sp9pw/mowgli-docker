@@ -365,6 +365,16 @@ def patch(workspace):
       ROS_WARN("Mowgli heading v6: initialized heading from the charging dock.");
     }""")
 
+    comms_path = workspace / "src/open_mower/launch/include/_comms.launch"
+    comms = comms_path.read_text()
+    watchdog = '''        <node pkg="open_mower" type="gps_watchdog.py" name="mowgli_gps_watchdog"
+              output="screen" respawn="true" respawn_delay="10"
+              unless="$(optenv OM_NO_GPS False)"/>
+'''
+    comms = replace_once(comms, '        <!-- GPS driver only for v1 builds -->',
+                         watchdog + '        <!-- GPS driver only for v1 builds -->')
+    comms_path.write_text(comms)
+
     header_path.write_text(header)
     source_path.write_text(source)
     behavior_path.write_text(behavior)
