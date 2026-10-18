@@ -231,122 +231,18 @@ def patch(workspace):
 
     positioning_path = workspace / "src/lib/xbot_positioning/src/xbot_positioning.cpp"
     positioning = positioning_path.read_text()
-    positioning = replace_once(positioning, "void onImu(const sensor_msgs::Imu::ConstPtr &msg) {",
-        '#include "heading_ros.h"\n\nvoid onImu(const sensor_msgs::Imu::ConstPtr &msg) {')
+    # Simple startup yaw correction: once when xbot_positioning starts.
+    # A later known dock pose sent via setPose() overrides this initial yaw.
     positioning = replace_once(positioning,
-        "    core.predict(vx, msg->angular_velocity.z - gyro_offset, (msg->header.stamp - last_imu.header.stamp).toSec());",
-        """    // The first sample establishes the timestamp baseline; it is not a discontinuity.
-    if (last_imu.header.stamp.isZero())
-    {
-        last_imu = *msg;
-        return;
-    }
-    const double mowgli_imu_dt = (msg->header.stamp - last_imu.header.stamp).toSec();
-    const auto mowgli_imu_action = mowgli_heading::classify_interval(mowgli_imu_dt);
-    if (mowgli_imu_action == mowgli_heading::IntervalAction::Discard && ++mowgli_imu_discard_count <= 2)
-    {
-        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v6: dropped IMU sample; dt=" << mowgli_imu_dt
-            << ", stamp=" << msg->header.stamp.toSec()
-            << ", last=" << last_imu.header.stamp.toSec());
-        return;
-    }
-    if (mowgli_imu_action != mowgli_heading::IntervalAction::Integrate ||
-        !std::isfinite(msg->angular_velocity.z) || !std::isfinite(vx))
-    {
-        last_imu = *msg;
-        mowgli_imu_discard_count = 0;
-        if (mowgli_restore_heading)
-        {
-            mowgli_invalidate_heading_checkpoint();
-            mowgli_heading_known = false;
-        }
-        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v6: IMU discontinuity; dt=" << mowgli_imu_dt
-            << ", stamp=" << msg->header.stamp.toSec()
-            << "; heading invalid, initialize at dock.");
-        return;
-    }
-    mowgli_imu_discard_count = 0;
-    mowgli_track_stationary(msg->angular_velocity.z - gyro_offset);
-    core.predict(vx, msg->angular_velocity.z - gyro_offset, mowgli_imu_dt);""")
-    positioning = replace_once(positioning,
-        '            ROS_WARN("Skipped gyro calibration");\n            has_gyro = true;',
-        '            ROS_WARN("Skipped gyro calibration");\n            last_imu = *msg;\n            has_gyro = true;')
-    positioning = replace_once(positioning, "    xb_absolute_pose_msg.orientation_valid = true;",
-        "    xb_absolute_pose_msg.orientation_valid = !mowgli_restore_heading || mowgli_heading_known;")
-    positioning = replace_once(positioning, "void onWheelTicks(const xbot_msgs::WheelTick::ConstPtr &msg) {", """void onWheelTicks(const xbot_msgs::WheelTick::ConstPtr &msg) {
-    const int mowgli_rear_wheels = xbot_msgs::WheelTick::WHEEL_VALID_RL | xbot_msgs::WheelTick::WHEEL_VALID_RR;
-    if (msg->wheel_tick_factor == 0 || (msg->valid_wheels & mowgli_rear_wheels) != mowgli_rear_wheels)
-    {
-        has_ticks = false;
-        vx = 0.0;
-        mowgli_last_speed = ros::WallTime();
-        if (mowgli_restore_heading)
-        {
-            mowgli_invalidate_heading_checkpoint();
-            mowgli_heading_known = false;
-        }
-        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v6: invalid wheel data; factor=" << msg->wheel_tick_factor
-            << ", valid_wheels=" << int(msg->valid_wheels));
-        return;
-    }""")
-    positioning = replace_once(positioning, "    double dt = (msg->stamp - last_ticks.stamp).toSec();", """    double dt = (msg->stamp - last_ticks.stamp).toSec();
-    // No previous wheel timestamp exists on startup. Preserve a valid heading checkpoint.
-    if (last_ticks.stamp.isZero())
-    {
-        last_ticks = *msg;
-        mowgli_last_speed = ros::WallTime::now();
-        return;
-    }
-    const auto mowgli_tick_action = mowgli_heading::classify_interval(dt);
-    if (mowgli_tick_action == mowgli_heading::IntervalAction::Discard && ++mowgli_tick_discard_count <= 2)
-    {
-        ROS_WARN_STREAM_THROTTLE(5, "Mowgli heading v6: dropped wheel sample; dt=" << dt);
-        return;
-    }
-    if (mowgli_tick_action != mowgli_heading::IntervalAction::Integrate)
-    {
-        last_ticks = *msg;
-        mowgli_tick_discard_count = 0;
-        vx = 0.0;
-        mowgli_last_speed = ros::WallTime();
-        if (mowgli_restore_heading)
-        {
-            mowgli_invalidate_heading_checkpoint();
-            mowgli_heading_known = false;
-        }
-        ROS_ERROR_STREAM_THROTTLE(5, "Mowgli heading v6: invalid wheel sample; dt=" << dt
-            << ", factor=" << msg->wheel_tick_factor << ", valid_wheels=" << int(msg->valid_wheels));
-        return;
-    }""")
-    positioning = replace_once(positioning, "    vx = d_ticks / dt;", """    mowgli_tick_discard_count = 0;
-    if (mowgli_restore_heading && (d_wheel_l != 0.0 || d_wheel_r != 0.0))
-    {
-        mowgli_stationary_since = ros::WallTime();
-        mowgli_heading_samples = 0;
-        if (mowgli_heading_pending || mowgli_heading_saved)
-            mowgli_invalidate_heading_checkpoint();
-    }
-    vx = d_ticks / dt;
-    mowgli_last_speed = ros::WallTime::now();""")
-    positioning = replace_once(positioning, "    vx = msg->twist.linear.x;",
-        "    vx = msg->twist.linear.x;\n    mowgli_last_speed = ros::WallTime::now();")
-    positioning = replace_once(positioning, "    tf2::Matrix3x3 m(q);",
-        "    if (!std::isfinite(q.length2()) || std::abs(q.length2() - 1.0) > 0.001)\n"
-        "        return false;\n    tf2::Matrix3x3 m(q);")
-    positioning = replace_once(positioning, "    core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);",
-        """    if (!std::isfinite(req.robot_pose.position.x) || !std::isfinite(req.robot_pose.position.y) ||
-        !std::isfinite(yaw))
-        return false;
-    if (!mowgli_invalidate_heading_checkpoint())
-        return false;
-    core.setState(req.robot_pose.position.x, req.robot_pose.position.y, yaw, 0, 0);
-    mowgli_heading_known = true;
-    mowgli_heading_pending = false;""")
-    positioning = replace_once(positioning, "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {",
-        "void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {\n"
-        "    if (mowgli_observe_raw_gps(*msg))\n        mowgli_try_restore_heading(*msg);")
-    positioning = replace_once(positioning, "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);",
-        "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);\n    mowgli_initialize_heading(paramNh);")
+        "    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);",
+        """    core.setAntennaOffset(antenna_offset_x, antenna_offset_y);
+    double mowgli_startup_yaw_deg = 180.0;
+    paramNh.param("mowgli_startup_yaw_deg", mowgli_startup_yaw_deg, 180.0);
+    if (!std::isfinite(mowgli_startup_yaw_deg))
+        mowgli_startup_yaw_deg = 180.0;
+    core.setState(0.0, 0.0, mowgli_startup_yaw_deg * (std::acos(-1.0) / 180.0), 0.0, 0.0);
+    ROS_WARN_STREAM("Mowgli startup heading offset: " << mowgli_startup_yaw_deg
+        << " degrees; dock setPose overrides it.");""")
 
     idle_path = workspace / "src/mower_logic/src/mower_logic/behaviors/IdleBehavior.cpp"
     idle = replace_once(idle_path.read_text(), "extern mower_msgs::Power getPower();",
@@ -437,8 +333,6 @@ def patch(workspace):
     launch_path.write_text(launch)
     positioning_path.write_text(positioning)
     idle_path.write_text(idle)
-    for helper_name in ("heading_checkpoint.h", "heading_ros.h"):
-        (positioning_path.parent / helper_name).write_text(Path(__file__).with_name(helper_name).read_text())
     helper = Path(__file__).with_name("docking_control.h").read_text()
     (header_path.parent / "docking_control.h").write_text(helper)
 

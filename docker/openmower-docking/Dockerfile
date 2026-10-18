@@ -12,7 +12,6 @@ COPY --from=build /tmp/mowgli-docking-build/libftc_local_planner.so /opt/open_mo
 COPY --from=build /tmp/mowgli-docking-build/mower_logic /opt/open_mower_ros/devel/lib/mower_logic/mower_logic
 COPY --from=build /tmp/mowgli-docking-build/xbot_positioning /opt/open_mower_ros/devel/lib/xbot_positioning/xbot_positioning
 COPY --from=build /opt/open_mower_ros/src/lib/xbot_positioning/src/xbot_positioning.cpp /opt/open_mower_ros/src/lib/xbot_positioning/src/xbot_positioning.cpp
-COPY docker/openmower-docking/heading_checkpoint.h docker/openmower-docking/heading_ros.h /opt/open_mower_ros/src/lib/xbot_positioning/src/
 COPY --from=build /opt/open_mower_ros/src/lib/ftc_local_planner/src/ftc_planner.cpp /opt/open_mower_ros/src/lib/ftc_local_planner/src/ftc_planner.cpp
 COPY --from=build /opt/open_mower_ros/src/lib/ftc_local_planner/include/ftc_local_planner/ftc_planner.h /opt/open_mower_ros/src/lib/ftc_local_planner/include/ftc_local_planner/ftc_planner.h
 COPY --from=build /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/DockingBehavior.cpp /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/DockingBehavior.cpp
@@ -26,5 +25,5 @@ COPY docker/openmower-docking/gps_watchdog.py /opt/open_mower_ros/src/open_mower
 COPY --from=build /opt/open_mower_ros/src/open_mower/launch/include/_comms.launch /opt/open_mower_ros/src/open_mower/launch/include/_comms.launch
 RUN chmod +x /opt/open_mower_ros/src/open_mower/scripts/gps_watchdog.py
 COPY docker/openmower-docking/docking_control.h /opt/open_mower_ros/src/lib/ftc_local_planner/include/ftc_local_planner/docking_control.h
-LABEL io.mowgli.docking-fix="no-spin-v6"
+LABEL io.mowgli.docking-fix="startup-yaw-180"
 USER openmower
