@@ -13,6 +13,7 @@ on:
       - feature/rtk-float-gps-watchdog
       - fix/dock-heading-area-recording
       - fix/undocking-gps-timeout-v1
+      - fix/startup-yaw-180-simple
       - mowgli-map-editor-fix
     paths:
       - 'docker/openmower-docking/**'
@@ -52,7 +53,8 @@ jobs:
             --tag "${IMAGE_NAME}:heading-fix7" \
             --tag "${IMAGE_NAME}:gps-watchdog-test" \
             --tag "${IMAGE_NAME}:dock-heading-test" \
-            --tag "${IMAGE_NAME}:undock-timeout-test" .
+            --tag "${IMAGE_NAME}:undock-timeout-test" \
+            --tag "${IMAGE_NAME}:startup-yaw-180-test" .
 
       - name: Check runtime library
         run: |
@@ -65,7 +67,7 @@ jobs:
             cat /tmp/link-check
             ! grep -E "not found|undefined symbol" /tmp/link-check
             strings /opt/open_mower_ros/devel/lib/mower_logic/mower_logic | grep DockingApproachFTCPlanner > /dev/null
-            strings /opt/open_mower_ros/devel/lib/xbot_positioning/xbot_positioning | grep 'Mowgli heading v6 restored' > /dev/null
+            strings /opt/open_mower_ros/devel/lib/xbot_positioning/xbot_positioning | grep 'Mowgli startup heading offset' > /dev/null
           '
 
       - name: Publish image
@@ -74,7 +76,9 @@ jobs:
         run: |
           echo "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
           docker push "${IMAGE_NAME}:docking-${GITHUB_SHA}"
-          if [[ "${GITHUB_REF_NAME}" == "fix/undocking-gps-timeout-v1" ]]; then
+          if [[ "${GITHUB_REF_NAME}" == "fix/startup-yaw-180-simple" ]]; then
+            docker push "${IMAGE_NAME}:startup-yaw-180-test"
+          elif [[ "${GITHUB_REF_NAME}" == "fix/undocking-gps-timeout-v1" ]]; then
             docker push "${IMAGE_NAME}:undock-timeout-test"
           elif [[ "${GITHUB_REF_NAME}" == "fix/dock-heading-area-recording" ]]; then
             docker push "${IMAGE_NAME}:dock-heading-test"
