@@ -12,6 +12,7 @@ on:
       - fix/heading-startup-first-samples
       - feature/rtk-float-gps-watchdog
       - fix/dock-heading-area-recording
+      - fix/undocking-gps-timeout-v1
       - mowgli-map-editor-fix
     paths:
       - 'docker/openmower-docking/**'
@@ -50,7 +51,8 @@ jobs:
             --tag "${IMAGE_NAME}:docking-no-spin" \
             --tag "${IMAGE_NAME}:heading-fix7" \
             --tag "${IMAGE_NAME}:gps-watchdog-test" \
-            --tag "${IMAGE_NAME}:dock-heading-test" .
+            --tag "${IMAGE_NAME}:dock-heading-test" \
+            --tag "${IMAGE_NAME}:undock-timeout-test" .
 
       - name: Check runtime library
         run: |
@@ -72,7 +74,9 @@ jobs:
         run: |
           echo "${GH_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
           docker push "${IMAGE_NAME}:docking-${GITHUB_SHA}"
-          if [[ "${GITHUB_REF_NAME}" == "fix/dock-heading-area-recording" ]]; then
+          if [[ "${GITHUB_REF_NAME}" == "fix/undocking-gps-timeout-v1" ]]; then
+            docker push "${IMAGE_NAME}:undock-timeout-test"
+          elif [[ "${GITHUB_REF_NAME}" == "fix/dock-heading-area-recording" ]]; then
             docker push "${IMAGE_NAME}:dock-heading-test"
           elif [[ "${GITHUB_REF_NAME}" == "feature/rtk-float-gps-watchdog" ]]; then
             docker push "${IMAGE_NAME}:gps-watchdog-test"

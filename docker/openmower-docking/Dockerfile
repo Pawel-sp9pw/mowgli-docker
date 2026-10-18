@@ -18,6 +18,7 @@ COPY --from=build /opt/open_mower_ros/src/lib/ftc_local_planner/include/ftc_loca
 COPY --from=build /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/DockingBehavior.cpp /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/DockingBehavior.cpp
 COPY --from=build /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/IdleBehavior.cpp /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/IdleBehavior.cpp
 COPY --from=build /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/AreaRecordingBehavior.cpp /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/AreaRecordingBehavior.cpp
+COPY --from=build /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/UndockingBehavior.cpp /opt/open_mower_ros/src/mower_logic/src/mower_logic/behaviors/UndockingBehavior.cpp
 COPY --from=build /opt/open_mower_ros/src/open_mower/params/move_base_flex.yaml /opt/open_mower_ros/src/open_mower/params/move_base_flex.yaml
 COPY --from=build /opt/open_mower_ros/src/open_mower/launch/include/_move_base.launch /opt/open_mower_ros/src/open_mower/launch/include/_move_base.launch
 COPY docker/openmower-docking/register_controller.py /opt/mowgli-docking/register_controller.py

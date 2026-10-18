@@ -365,6 +365,23 @@ def patch(workspace):
       ROS_WARN("Mowgli heading v6: initialized heading from the charging dock.");
     }""")
 
+    # The upstream undocking GPS wait has no timeout and can leave the state
+    # stuck indefinitely after a lost RTK fix or invalid heading.
+    undock_path = workspace / "src/mower_logic/src/mower_logic/behaviors/UndockingBehavior.cpp"
+    undock = undock_path.read_text()
+    undock = replace_once(undock,
+        '  ros::Rate odom_rate(1.0);\n  while (ros::ok() && !aborted) {',
+        '''  ros::Rate odom_rate(1.0);
+  const ros::WallTime wait_start = ros::WallTime::now();
+  const double max_gps_wait_seconds = 90.0;
+  while (ros::ok() && !aborted) {
+    if ((ros::WallTime::now() - wait_start).toSec() >= max_gps_wait_seconds) {
+      ROS_ERROR("Mowgli undocking: GPS/heading not valid after 90 seconds; stop waiting and return to IDLE.");
+      stopMoving();
+      return false;
+    }''')
+    undock_path.write_text(undock)
+
     # IDLE can immediately redirect into AREA_RECORDING before running its dock
     # initialization loop. Recover known dock heading there too, without RTK.
     recording_path = workspace / "src/mower_logic/src/mower_logic/behaviors/AreaRecordingBehavior.cpp"
