@@ -370,14 +370,14 @@ def patch(workspace):
     recording_path = workspace / "src/mower_logic/src/mower_logic/behaviors/AreaRecordingBehavior.cpp"
     recording = recording_path.read_text()
     recording = replace_once(recording, '#include <limits>',
-        '#include <limits>\\n#include <mower_msgs/Power.h>')
+        '#include <limits>\n#include <mower_msgs/Power.h>\n#include "mower_logic/utils.h"')
     recording = replace_once(recording, 'extern void stop();',
-        'extern void stop();\\nextern mower_msgs::Power getPower();\\n'
-        'extern xbot_msgs::AbsolutePose getPose();\\n'
+        'extern void stop();\nextern mower_msgs::Power getPower();\n'
+        'extern xbot_msgs::AbsolutePose getPose();\n'
         'extern void setRobotPose(geometry_msgs::Pose& pose);')
     recording = replace_once(recording,
         '  ros::Rate inputDelay(ros::Duration().fromSec(0.1));',
-        '  ros::Rate inputDelay(ros::Duration().fromSec(0.1));\\n'
+        '  ros::Rate inputDelay(ros::Duration().fromSec(0.1));\n'
         '  ros::WallTime mowgli_last_dock_heading_attempt;')
     recording = replace_once(recording, '      if (set_docking_position) {',
         """      // AREA_RECORDING may be entered before IDLE can seed heading.
