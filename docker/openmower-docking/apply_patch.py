@@ -370,7 +370,7 @@ def patch(workspace):
     undock_path = workspace / "src/mower_logic/src/mower_logic/behaviors/UndockingBehavior.cpp"
     undock = undock_path.read_text()
     undock = replace_once(undock,
-        '  ros::Rate odom_rate(1.0);\\n  while (ros::ok() && !aborted) {',
+        '  ros::Rate odom_rate(1.0);\n  while (ros::ok() && !aborted) {',
         '''  ros::Rate odom_rate(1.0);
   const ros::WallTime wait_start = ros::WallTime::now();
   const double max_gps_wait_seconds = 90.0;
