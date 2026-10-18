@@ -365,6 +365,44 @@ def patch(workspace):
       ROS_WARN("Mowgli heading v6: initialized heading from the charging dock.");
     }""")
 
+    # IDLE can immediately redirect into AREA_RECORDING before running its dock
+    # initialization loop. Recover known dock heading there too, without RTK.
+    recording_path = workspace / "src/mower_logic/src/mower_logic/behaviors/AreaRecordingBehavior.cpp"
+    recording = recording_path.read_text()
+    recording = replace_once(recording, '#include <limits>',
+        '#include <limits>\\n#include <mower_msgs/Power.h>')
+    recording = replace_once(recording, 'extern void stop();',
+        'extern void stop();\\nextern mower_msgs::Power getPower();\\n'
+        'extern xbot_msgs::AbsolutePose getPose();\\n'
+        'extern void setRobotPose(geometry_msgs::Pose& pose);')
+    recording = replace_once(recording,
+        '  ros::Rate inputDelay(ros::Duration().fromSec(0.1));',
+        '  ros::Rate inputDelay(ros::Duration().fromSec(0.1));\\n'
+        '  ros::WallTime mowgli_last_dock_heading_attempt;')
+    recording = replace_once(recording, '      if (set_docking_position) {',
+        """      // AREA_RECORDING may be entered before IDLE can seed heading.
+      // A fixed physical dock pose is authoritative while charging, even
+      // when the antenna has no RTK FIX under the docking station roof.
+      const auto mowgli_power = getPower();
+      const double mowgli_power_age = (ros::Time::now() - mowgli_power.stamp).toSec();
+      const double mowgli_charge_v = utils::GetFirstValid(
+          {mowgli_power.charge_voltage_adc, mowgli_power.charge_voltage});
+      if (!getPose().orientation_valid && mowgli_charge_v > 5.0 &&
+          mowgli_power_age >= 0.0 && mowgli_power_age < 1.0 &&
+          (ros::WallTime::now() - mowgli_last_dock_heading_attempt).toSec() >= 2.0) {
+        mowgli_last_dock_heading_attempt = ros::WallTime::now();
+        mower_map::GetDockingPointSrv mowgli_dock;
+        if (dockingPointClient.call(mowgli_dock)) {
+          geometry_msgs::Pose trusted_dock_pose = mowgli_dock.response.docking_pose;
+          setRobotPose(trusted_dock_pose);
+          ROS_WARN("Mowgli dock heading: requested dock pose while charging in AREA_RECORDING (RTK not required).");
+        } else {
+          ROS_WARN_THROTTLE(10, "Mowgli dock heading: no stored docking point; cannot safely initialize heading.");
+        }
+      }
+      if (set_docking_position) {""")
+    recording_path.write_text(recording)
+
     comms_path = workspace / "src/open_mower/launch/include/_comms.launch"
     comms = comms_path.read_text()
     watchdog = '''        <node pkg="open_mower" type="gps_watchdog.py" name="mowgli_gps_watchdog"
