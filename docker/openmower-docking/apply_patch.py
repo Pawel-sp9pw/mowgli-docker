@@ -319,7 +319,7 @@ def patch(workspace):
         return;
     }""")
     positioning = replace_once(positioning, "    vx = d_ticks / dt;", """    mowgli_tick_discard_count = 0;
-    if (mowgli_restore_heading && (d_wheel_l != 0.0 || d_wheel_r != 0.0))
+    if (mowgli_restore_heading &&\n        (std::abs(d_wheel_l) > 0.02 || std::abs(d_wheel_r) > 0.02))
     {
         mowgli_stationary_since = ros::WallTime();
         mowgli_heading_samples = 0;
