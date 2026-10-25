@@ -92,10 +92,7 @@ replace_once(
 \t\t\tdefer publisher.Close()
 \t\t\t// Wait for the ROS TCPROS handshake before the one-shot command.
 \t\t\ttime.Sleep(500 * time.Millisecond)
-\t\t\tif err = publisher.Write(&std_msgs.UInt8{Data: *request.Area}); err != nil {
-\t\t\t\tc.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: err.Error()})
-\t\t\t\treturn
-\t\t\t}''',
+\t\t\tpublisher.Write(&std_msgs.UInt8{Data: *request.Area})''',
 )
 
 print("OpenMower GUI v2 map compatibility changes applied successfully")
