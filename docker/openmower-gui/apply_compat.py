@@ -65,7 +65,7 @@ replace_once(
     openmower,
     '"github.com/bluenviron/goroslib/v2/pkg/msgs/geometry_msgs"',
     '"github.com/bluenviron/goroslib/v2/pkg/msgs/geometry_msgs"\n'
-    '\\t"github.com/bluenviron/goroslib/v2/pkg/msgs/std_msgs"',
+    '\t"github.com/bluenviron/goroslib/v2/pkg/msgs/std_msgs"',
 )
 replace_once(
     openmower,
