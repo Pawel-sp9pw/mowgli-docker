@@ -261,6 +261,59 @@ def patch(workspace):
       ROS_WARN("Mowgli heading v6: initialized heading from the charging dock.");
     }""")
 
+    # GUI Mow Area: select an actual indexed map area, then start mowing
+    # through the standard IDLE command path (which handles undocking).
+    mowing_header_path = workspace / "src/mower_logic/src/mower_logic/behaviors/MowingBehavior.h"
+    mowing_header = mowing_header_path.read_text()
+    mowing_header = replace_once(mowing_header, "  void reset() override;",
+        "  void reset() override;\n  void mowgli_select_area(int area_index);")
+    mowing_header_path.write_text(mowing_header)
+
+    mowing_path = workspace / "src/mower_logic/src/mower_logic/behaviors/MowingBehavior.cpp"
+    mowing = mowing_path.read_text()
+    mowing = replace_once(mowing, "void MowingBehavior::reset() {",
+        """void MowingBehavior::mowgli_select_area(int area_index) {
+  currentMowingPaths.clear();
+  currentMowingArea = area_index;
+  currentMowingPath = 0;
+  currentMowingPathIndex = 0;
+  currentMowingPlanDigest.clear();
+  ROS_WARN_STREAM("Mowgli Mow Area: selected area index " << area_index);
+}
+
+void MowingBehavior::reset() {""")
+    mowing_path.write_text(mowing)
+
+    logic_path = workspace / "src/mower_logic/src/mower_logic/mower_logic.cpp"
+    logic = logic_path.read_text()
+    logic = replace_once(logic, '#include "std_msgs/String.h"',
+        '#include "std_msgs/String.h"\n#include "std_msgs/UInt8.h"')
+    logic = replace_once(logic,
+        'void actionReceived(const std_msgs::String::ConstPtr& action) {',
+        """void mowgliStartAreaReceived(const std_msgs::UInt8::ConstPtr& msg) {
+  if (currentBehavior != &IdleBehavior::INSTANCE &&
+      currentBehavior != &IdleBehavior::DOCKED_INSTANCE) {
+    ROS_WARN("Mowgli Mow Area: rejected selection; robot must be IDLE.");
+    return;
+  }
+  mower_map::GetMowingAreaSrv request;
+  request.request.index = msg->data;
+  if (!mapClient.call(request) || !request.response.area.active) {
+    ROS_ERROR_STREAM("Mowgli Mow Area: missing or inactive area index " << int(msg->data));
+    return;
+  }
+  MowingBehavior::INSTANCE.mowgli_select_area(msg->data);
+  ROS_WARN_STREAM("Mowgli Mow Area: starting selected area index " << int(msg->data));
+  currentBehavior->command_start();
+}
+
+void actionReceived(const std_msgs::String::ConstPtr& action) {""")
+    logic = replace_once(logic,
+        '  ros::ServiceServer high_level_control_srv = n->advertiseService("mower_service/high_level_control", highLevelCommand);',
+        '''  ros::Subscriber mowgli_area_select = n->subscribe("/mowgli/start_in_area", 1, mowgliStartAreaReceived);
+  ros::ServiceServer high_level_control_srv = n->advertiseService("mower_service/high_level_control", highLevelCommand);''')
+    logic_path.write_text(logic)
+
     # The upstream undocking GPS wait has no timeout and can leave the state
     # stuck indefinitely after a lost RTK fix or invalid heading.
     undock_path = workspace / "src/mower_logic/src/mower_logic/behaviors/UndockingBehavior.cpp"

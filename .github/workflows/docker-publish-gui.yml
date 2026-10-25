@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - mowgli-map-editor-fix
+      - fix/mow-selected-area-v1
     paths:
       - 'docker/openmower-gui/**'
       - '.github/workflows/docker-publish-gui.yml'
@@ -53,7 +54,6 @@ jobs:
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --file docker/openmower-gui/Dockerfile \
-            --tag "${IMAGE_NAME}:mowgli-map-editor-fix" \
-            --tag "${IMAGE_NAME}:latest" \
+            --tag "${IMAGE_NAME}:mow-area-test" \
             --push \
             .

@@ -1,0 +1,5 @@
+services:
+  openmower:
+    image: ${MOW_AREA_IMAGE:-ghcr.io/pawel-sp9pw/mowgli-docker:mow-area-test}
+  gui:
+    image: ${MOW_AREA_GUI_IMAGE:-ghcr.io/pawel-sp9pw/openmower-gui:mow-area-test}
