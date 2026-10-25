@@ -58,4 +58,44 @@ replace_once(
     '''type MapArea struct {\n    msg.Package `ros:"mower_map"`\n    Name string\n    Active bool\n    Area geometry_msgs.Polygon\n    Obstacles []geometry_msgs.Polygon\n    Angle float64\n    OutlineCount int32 `rosname:"outline_count"`\n    OutlineOverlapCount int32 `rosname:"outline_overlap_count"`\n    OutlineOffset float64 `rosname:"outline_offset"`\n}\n''',
 )
 
+# Mow Area previously called /mower_service/start_in_area, which the
+# deployed OpenMower backend does not implement. Send a validated selection
+# to the Mowgli mower_logic area-start subscriber instead.
+replace_once(
+    openmower,
+    '"github.com/bluenviron/goroslib/v2/pkg/msgs/geometry_msgs"',
+    '"github.com/bluenviron/goroslib/v2/pkg/msgs/geometry_msgs"\n'
+    '\\t"github.com/bluenviron/goroslib/v2/pkg/msgs/std_msgs"',
+)
+replace_once(
+    openmower,
+    '''\t\tcase "start_in_area":
+\t\t\tvar CallReq mower_msgs.StartInAreaSrvReq
+\t\t\terr = c.BindJSON(&CallReq)
+\t\t\tif err != nil {
+\t\t\t\treturn
+\t\t\t}
+\t\t\terr = provider.CallService(c.Request.Context(), "/mower_service/start_in_area", &mower_msgs.StartInAreaSrv{}, &CallReq, &mower_msgs.StartInAreaSrvRes{})''',
+    '''\t\tcase "start_in_area":
+\t\t\tvar request struct {
+\t\t\t\tArea *uint8 `json:"area"`
+\t\t\t}
+\t\t\tif err = c.ShouldBindJSON(&request); err != nil || request.Area == nil {
+\t\t\t\tc.JSON(http.StatusBadRequest, ErrorResponse{Error: "missing or invalid area index"})
+\t\t\t\treturn
+\t\t\t}
+\t\t\tpublisher, publishErr := provider.Publisher("/mowgli/start_in_area", &std_msgs.UInt8{})
+\t\t\tif publishErr != nil {
+\t\t\t\tc.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: publishErr.Error()})
+\t\t\t\treturn
+\t\t\t}
+\t\t\tdefer publisher.Close()
+\t\t\t// Wait for the ROS TCPROS handshake before the one-shot command.
+\t\t\ttime.Sleep(500 * time.Millisecond)
+\t\t\tif err = publisher.Write(&std_msgs.UInt8{Data: *request.Area}); err != nil {
+\t\t\t\tc.JSON(http.StatusServiceUnavailable, ErrorResponse{Error: err.Error()})
+\t\t\t\treturn
+\t\t\t}''',
+)
+
 print("OpenMower GUI v2 map compatibility changes applied successfully")
